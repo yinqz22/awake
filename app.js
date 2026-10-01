@@ -12,7 +12,8 @@ const THEMES=[
  {id:'dark',label:'Dark',c1:'#3A3D4D',c2:'#5B8CFF'},
  {id:'navy',label:'Navy',c1:'#101B33',c2:'#4C8DFF'},
  {id:'dark-red',label:'Dark Red',c1:'#2A1719',c2:'#E5484D'},
- {id:'nature-green',label:'Nature',c1:'#152119',c2:'#42C878'}
+ {id:'nature-green',label:'Nature',c1:'#152119',c2:'#42C878'},
+ {id:'noir',label:'Noir',c1:'#1A1A1A',c2:'#6E6E6E'}
 ];
 
 
@@ -65,6 +66,17 @@ const I18N=[
 ['Aktuelles Passwort ist falsch.','Current password is wrong.','كلمة المرور الحالية غير صحيحة.'],
 ['Neues Passwort: mindestens 8 Zeichen und eine Zahl.','New password: at least 8 characters and one number.','كلمة المرور الجديدة: 8 أحرف على الأقل ورقم واحد.'],
 ['Datenbank nicht konfiguriert (siehe README).','Database not configured (see README).','قاعدة البيانات غير مهيأة (انظر README).'],
+['Entfernen','Remove','إزالة'],['Freund entfernt.','Friend removed.','تمت إزالة الصداقة.'],
+['Session löschen','Delete session','حذف الجلسة'],['Session verlassen','Leave session','مغادرة الجلسة'],
+['Das kann nicht rückgängig gemacht werden. Alle Artikel, Ordner und das Audit-Log gehen verloren.','This cannot be undone. All items, folders and the audit log will be lost.','لا يمكن التراجع عن هذا. ستفقد جميع المنتجات والمجلدات وسجل التدقيق.'],
+['Du kannst später mit dem Session-Code erneut beitreten.','You can rejoin later with the session code.','يمكنك الانضمام لاحقًا مرة أخرى باستخدام رمز الجلسة.'],
+['Verlassen','Leave','مغادرة'],['Session gelöscht.','Session deleted.','تم حذف الجلسة.'],
+['Du hast die Session verlassen.',"You've left the session.",'لقد غادرت الجلسة.'],
+['Animation','Animation','الحركة'],['Aus','Off','إيقاف'],['Schneefall','Snowfall','تساقط الثلج'],
+['Account löschen','Delete account','حذف الحساب'],['Account endgültig löschen','Permanently delete account','حذف الحساب نهائيًا'],
+['Diese Aktion kann nicht rückgängig gemacht werden. Gib dein Passwort ein, um zu bestätigen.','This action cannot be undone. Enter your password to confirm.','لا يمكن التراجع عن هذا الإجراء. أدخل كلمة المرور للتأكيد.'],
+['Bist du sicher, dass du dich abmelden willst?','Are you sure you want to log out?','هل أنت متأكد أنك تريد تسجيل الخروج؟'],
+['Ja, abmelden','Yes, log out','نعم، تسجيل الخروج'],
 ['Passwort-Reset per E-Mail ist in dieser Vorschau nicht verfügbar. Bitte aktuelles Passwort verwenden.','Password reset by email is not available in this preview. Please use your current password.','إعادة تعيين كلمة المرور عبر البريد غير متاحة في هذه النسخة. يرجى استخدام كلمة المرور الحالية.']
 ];
 const DICT={en:{},ar:{}}; I18N.forEach(([de,en,ar])=>{DICT.en[de]=en; DICT.ar[de]=ar;});
@@ -84,7 +96,9 @@ const PATTERNS=[
  [/^hat den Ordner „(.*)" gelöscht$/,{en:n=>`deleted the folder “${n}”`,ar:n=>`حذف المجلد «${n}»`}],
  [/^hat die Krone an (.*) übergeben$/,{en:n=>`handed the crown to ${n}`,ar:n=>`سلّم التاج إلى ${n}`}],
  [/^hat (.*) zum Admin ernannt$/,{en:n=>`made ${n} an admin`,ar:n=>`عيّن ${n} مشرفًا`}],
- [/^hat (.*) aus der Session entfernt$/,{en:n=>`removed ${n} from the session`,ar:n=>`أزال ${n} من الجلسة`}]
+ [/^hat (.*) aus der Session entfernt$/,{en:n=>`removed ${n} from the session`,ar:n=>`أزال ${n} من الجلسة`}],
+ [/^Session „(.*)" löschen\?$/,{en:n=>`Delete session "${n}"?`,ar:n=>`حذف الجلسة "${n}"؟`}],
+ [/^hat die Session verlassen$/,{en:()=>'left the session',ar:()=>'غادر الجلسة'}]
 ];
 function tr(str){
   if(curLang==='de'||!str) return str;
@@ -179,7 +193,7 @@ async function doRegister(e){
     const existing = await db.doc('users/'+safeId(name)).get();
     if(existing && existing.exists){ errEl.textContent='Dieser Name ist schon vergeben.'; return false; }
     const passHash = await sha256(pass);
-    const data = {name, passHash, avatar:'', lang:'en', theme:'dark', friends:[], incoming:[], outgoing:[], sessions:[], createdAt:Date.now()};
+    const data = {name, passHash, avatar:'', lang:'en', theme:'dark', friends:[], incoming:[], outgoing:[], sessions:[], snow:false, createdAt:Date.now()};
     await db.doc('users/'+safeId(name)).set(data);
     await loginAs(name);
   }catch(err){ errEl.textContent='Fehler: '+(err.message||err); }
@@ -208,6 +222,7 @@ async function loginAs(name, silent){
   LS.set('awake_user', JSON.stringify({name}));
   applyTheme(user.theme||'dark');
   applyLang(user.lang||'en');
+  applySnow(!!user.snow);
   subscribeMe();
   document.getElementById('auth').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -217,8 +232,34 @@ async function loginAs(name, silent){
 }
 
 function logout(){ LS.del('awake_user'); location.reload(); }
+function confirmLogout(){
+  showModal(`<h3>Bist du sicher, dass du dich abmelden willst?</h3>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="background:var(--danger)" onclick="logout()">Ja, abmelden</button></div>`);
+}
 
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t==='system'?'':t); }
+
+let snowTimer=null;
+function startSnow(){
+  if(snowTimer) return;
+  const layer=document.getElementById('snowLayer'); if(!layer) return;
+  snowTimer=setInterval(()=>{
+    const f=document.createElement('span');
+    f.className='snowflake'; f.textContent='.';
+    f.style.left=(Math.random()*100)+'%';
+    f.style.fontSize=(10+Math.random()*14)+'px';
+    f.style.opacity=(0.15+Math.random()*0.35).toFixed(2);
+    const dur=6+Math.random()*6;
+    f.style.animationDuration=dur+'s';
+    layer.appendChild(f);
+    setTimeout(()=>f.remove(), dur*1000+200);
+  }, 260);
+}
+function stopSnow(){
+  if(snowTimer){ clearInterval(snowTimer); snowTimer=null; }
+  const layer=document.getElementById('snowLayer'); if(layer) layer.innerHTML='';
+}
+function applySnow(on){ on ? startSnow() : stopSnow(); }
 
 function initials(n){ return (n||'?').slice(0,2).toUpperCase(); }
 
@@ -296,11 +337,21 @@ function renderFriends(){
   if(inc.length){
     h+='<div class="sub-title">Freundschaftsanfragen</div>'+inc.map(n=>`<div class="friend-row req"><div class="avatar">${initials(n)}</div><b>${esc(n)}</b><div class="req-btns"><button class="btn-small solid" data-n="${esc(n)}" onclick="acceptFriend(this.dataset.n)">Annehmen</button><button class="btn-small" data-n="${esc(n)}" onclick="declineFriend(this.dataset.n)">Ablehnen</button></div></div>`).join('');
   }
-  h+=friends.map(f=>`<div class="friend-row"><div class="avatar">${initials(f)}</div><b>${esc(f)}</b></div>`).join('');
+  h+=friends.map(f=>`<div class="friend-row"><div class="avatar">${initials(f)}</div><b>${esc(f)}</b><button class="audit-del" data-n="${esc(f)}" title="Entfernen" onclick="removeFriend(this.dataset.n)">✕</button></div>`).join('');
   h+=out.map(f=>`<div class="friend-row"><div class="avatar">${initials(f)}</div><b>${esc(f)}</b><small>Ausstehend</small></div>`).join('');
   el.innerHTML=h||'<div class="empty">Noch keine Freunde</div>';
 }
 
+async function removeFriend(name){
+  const friends=(user.friends||[]).filter(f=>f!==name);
+  await db.doc('users/'+user.id).update({friends});
+  user.friends=friends;
+  const tid=safeId(name);
+  const tdoc=await db.doc('users/'+tid).get();
+  if(tdoc.exists){ const tf=(tdoc.data().friends||[]).filter(f=>f!==user.name); await db.doc('users/'+tid).update({friends:tf}); }
+  renderFriends();
+  toast('Freund entfernt.');
+}
 async function addFriend(){
   const inp=document.getElementById('friendInput');
   const ok=await sendFriendRequest(inp.value);
@@ -461,7 +512,12 @@ function renderSessionTab(tab){
   currentTab=tab;
   const c = document.getElementById('content');
   c.innerHTML = `<div class="fade">
-    <button class="btn-small" onclick="showView('home')" style="margin-bottom:18px">← Zurück</button>
+    <div class="row-between" style="margin-bottom:18px">
+      <button class="btn-small" onclick="showView('home')">← Zurück</button>
+      ${isOwner()
+        ? `<button class="btn-small" style="color:var(--danger);border-color:var(--danger)" onclick="confirmDeleteSession()">Session löschen</button>`
+        : `<button class="btn-small" onclick="confirmLeaveSession()">Session verlassen</button>`}
+    </div>
     <div class="tabs" style="max-width:440px;margin-bottom:22px">
       <button class="${tab==='lager'?'active':''}" onclick="renderSessionTab('lager')">Lager</button>
       <button class="${tab==='stats'?'active':''}" onclick="renderSessionTab('stats')">Statistiken</button>
@@ -754,11 +810,44 @@ function renderSettings(){
     <h3>Theme</h3>
     <div class="theme-grid" id="themeGrid"></div>
 
+    <h3>Animation</h3>
+    <div class="anim-grid" id="animGrid">
+      <div class="anim-opt ${!user.snow?'sel':''}" data-snow="0" onclick="pickSnow(false)"><span class="ic">✕</span>Aus</div>
+      <div class="anim-opt ${user.snow?'sel':''}" data-snow="1" onclick="pickSnow(true)"><span class="ic">·</span>Schneefall</div>
+    </div>
+
     <button class="btn-primary" style="margin-top:26px" onclick="saveSettings()">Einstellungen speichern</button>
-    <button class="btn-ghost" style="width:100%;margin-top:10px;color:var(--danger);border-color:var(--danger)" onclick="logout()">Abmelden</button>
+    <button class="btn-ghost" style="width:100%;margin-top:10px;color:var(--danger);border-color:var(--danger)" onclick="confirmLogout()">Abmelden</button>
+    <button class="btn-ghost" style="width:100%;margin-top:10px;color:var(--danger);border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, transparent)" onclick="confirmDeleteAccount()">Account löschen</button>
   </div>`;
   const tg = document.getElementById('themeGrid');
   tg.innerHTML = THEMES.map(t=>`<div class="theme-swatch ${user.theme===t.id?'sel':''}" data-theme-id="${t.id}" style="background:linear-gradient(135deg,${t.c1},${t.c2})" onclick="pickTheme('${t.id}')"></div>`).join('');
+}
+function pickSnow(on){
+  user._pendingSnow = on;
+  applySnow(on);
+  document.querySelectorAll('.anim-opt').forEach(el=>el.classList.toggle('sel', (el.dataset.snow==='1')===on));
+}
+function confirmDeleteAccount(){
+  showModal(`<h3>Account löschen</h3>
+    <div class="hint">Diese Aktion kann nicht rückgängig gemacht werden. Gib dein Passwort ein, um zu bestätigen.</div>
+    <div class="field"><label>Passwort</label><input id="delAccPass" type="password"></div>
+    <div class="err" id="delAccErr"></div>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="background:var(--danger)" onclick="deleteAccountNow()">Account endgültig löschen</button></div>`);
+}
+async function deleteAccountNow(){
+  const pass = document.getElementById('delAccPass').value;
+  const errEl = document.getElementById('delAccErr');
+  const hash = await sha256(pass);
+  if(hash !== user.passHash){ errEl.textContent='Falsches Passwort.'; return; }
+  await Promise.all((user.friends||[]).map(async f=>{
+    try{ const tid=safeId(f); const td=await db.doc('users/'+tid).get();
+      if(td.exists) await db.doc('users/'+tid).update({friends:(td.data().friends||[]).filter(n=>n!==user.name)});
+    }catch(e){}
+  }));
+  await db.doc('users/'+user.id).delete();
+  LS.del('awake_user');
+  location.reload();
 }
 
 let pendingAvatar=null;
@@ -779,7 +868,8 @@ async function saveSettings(){
   const newPass = document.getElementById('newPass').value;
   const lang = document.getElementById('setLang').value;
   const theme = user._pendingTheme || user.theme || 'light';
-  const updates = {lang, theme};
+  const snow = user._pendingSnow !== undefined ? user._pendingSnow : !!user.snow;
+  const updates = {lang, theme, snow};
 
   if(newName && newName !== user.name){
     if(newName.length<2){ toast('Name zu kurz.'); return; }
@@ -807,9 +897,39 @@ async function saveSettings(){
   }
 
   await db.doc('users/'+user.id).update(updates);
-  user.lang = lang; user.theme = theme;
+  user.lang = lang; user.theme = theme; user.snow = snow;
   renderTop();
   toast('Einstellungen gespeichert.');
+}
+
+/* ---------- DELETE / LEAVE SESSION ---------- */
+function confirmDeleteSession(){
+  showModal(`<h3>Session „${esc(currentSession.name)}" löschen?</h3>
+    <div class="hint">Das kann nicht rückgängig gemacht werden. Alle Artikel, Ordner und das Audit-Log gehen verloren.</div>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="background:var(--danger)" onclick="deleteSessionNow()">Löschen</button></div>`);
+}
+async function deleteSessionNow(){
+  await db.doc('sessions/'+currentSession.id).delete();
+  user.sessions=(user.sessions||[]).filter(id=>id!==currentSession.id);
+  await db.doc('users/'+user.id).update({sessions:user.sessions});
+  closeModal();
+  showView('home');
+  toast('Session gelöscht.');
+}
+function confirmLeaveSession(){
+  showModal(`<h3>Session verlassen?</h3>
+    <div class="hint">Du kannst später mit dem Session-Code erneut beitreten.</div>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" onclick="leaveSessionNow()">Verlassen</button></div>`);
+}
+async function leaveSessionNow(){
+  const members=currentSession.members.filter(m=>m.name!==user.name);
+  const audit=[...(currentSession.audit||[]), {ts:Date.now(),actor:user.name,action:'hat die Session verlassen'}];
+  await db.doc('sessions/'+currentSession.id).update({members, audit});
+  user.sessions=(user.sessions||[]).filter(id=>id!==currentSession.id);
+  await db.doc('users/'+user.id).update({sessions:user.sessions});
+  closeModal();
+  showView('home');
+  toast('Du hast die Session verlassen.');
 }
 
 /* ---------- MODAL ---------- */
