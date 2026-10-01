@@ -21,6 +21,14 @@ Die Daten liegen bei Firebase (Firestore), nicht in den Dateien. Wenn du die Web
 3. **Settings → Pages** → Source: **Deploy from a branch** → Branch: `main`, Ordner: `/ (root)` → Save.
 4. Nach ca. 1 Minute ist die Seite erreichbar unter `https://DEIN-NAME.github.io/awake/`. Diesen Link schickst du deinen Freunden.
 
+## Als App installieren (PWA)
+Die Seite ist als installierbare App eingerichtet (Icon, Startbildschirm, Offline-Start) – es ist nichts weiter einzurichten, das läuft automatisch über GitHub Pages.
+- **iPhone (Safari):** Seite öffnen → Teilen-Symbol → „Zum Home-Bildschirm".
+- **Android (Chrome):** Seite öffnen → Menü (⋮) → „App installieren" bzw. „Zum Startbildschirm hinzufügen".
+- **Desktop (Chrome/Edge):** In der Adressleiste erscheint ein Installieren-Symbol.
+
+Kostenlos, kein App Store nötig. Wichtig: PWA-Installation funktioniert nur über `https://` (GitHub Pages liefert das automatisch), nicht beim lokalen Testen über `file://`.
+
 ## Updates
 Geänderte Dateien im Repo ersetzen (Add file → Upload files, gleiche Namen überschreiben). Die Daten bleiben in Firebase erhalten.
 

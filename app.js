@@ -149,6 +149,7 @@ async function boot(){
   if(saved){ try{ await loginAs(JSON.parse(saved).name, true);}catch(e){ LS.del('awake_user'); } }
 }
 let _rz; window.addEventListener('resize',()=>{clearTimeout(_rz);_rz=setTimeout(()=>{ if(currentView==='session'&&currentTab==='stats'&&currentSession) renderStats(); },200);});
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); }); }
 applyLang('en');
 boot();
 
