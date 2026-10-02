@@ -11,16 +11,16 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" type="image/png" href="favicon-32.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="favicon-32.png?v=3">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=3">
+<link rel="manifest" href="manifest.json?v=3">
 </head>
 <body>
 
 <!-- AUTH -->
 <div id="auth">
   <div class="auth-card fade">
-    <div class="auth-logo"><span class="logo-mark"></span><span class="brand">awake</span></div>
+    <div class="auth-logo"><span class="brand">awake</span></div>
     <div class="tabs">
       <button id="tabLogin" class="active" onclick="switchTab('login')">Anmelden</button>
       <button id="tabReg" onclick="switchTab('register')">Registrieren</button>
@@ -43,12 +43,12 @@
 <!-- APP -->
 <div id="app" class="hidden">
   <div id="sidebar">
-    <button class="side-btn active" id="navHome" onclick="showView('home')" title="Home">⌂</button>
-    <button class="side-btn" id="navSettings" onclick="showView('settings')" title="Einstellungen">⚙</button>
+    <button class="side-btn active" id="navHome" onclick="showView('home')" title="Home"><span class="ico ico-home"></span></button>
+    <button class="side-btn" id="navSettings" onclick="showView('settings')" title="Einstellungen"><span class="ico ico-gear"></span></button>
   </div>
   <div id="main">
     <div id="topbar">
-      <div class="top-left" onclick="showView('home')"><span class="logo-mark"></span><span class="brand">awake</span></div>
+      <div class="top-left" onclick="showView('home')"><span class="brand">awake</span></div>
       <div id="topMid"></div>
       <div class="top-right" onclick="showView('settings')">
         <span id="topName"></span>

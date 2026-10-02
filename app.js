@@ -72,6 +72,8 @@ const I18N=[
 ['Verlassen','Leave','مغادرة'],['Session gelöscht.','Session deleted.','تم حذف الجلسة.'],
 ['Du hast die Session verlassen.',"You've left the session.",'لقد غادرت الجلسة.'],
 ['Animation','Animation','الحركة'],['Aus','Off','إيقاف'],['Schneefall','Snowfall','تساقط الثلج'],
+['Bilder (optional)','Photos (optional)','الصور (اختياري)'],['Titelbild','Cover','الغلاف'],['Als Titelbild festlegen','Set as cover','تعيين كغلاف'],['Maximal 5 Bilder pro Artikel.','Maximum of 5 photos per item.','الحد الأقصى 5 صور لكل منتج.'],
+['Die Session ist voll. Entferne Bilder oder alte Artikel.','The session is full. Remove photos or old items.','الجلسة ممتلئة. احذف بعض الصور أو المنتجات القديمة.'],
 ['Hauptfarbe','Main color','اللون الرئيسي'],['Zweitfarbe','Second color','اللون الثانوي'],['Eigene Farben','Custom colors','ألوان مخصصة'],
 ['Hauptfarbe = Hintergrund · Zweitfarbe = Buttons & Akzente','Main color = background · Second color = buttons & accents','اللون الرئيسي = الخلفية · اللون الثانوي = الأزرار والتمييز'],
 ['Symbol hinzufügen','Add symbol','إضافة رمز'],['Emoji, Buchstabe oder Zahl','Emoji, letter or number','إيموجي أو حرف أو رقم'],['Hinzufügen','Add','إضافة'],
@@ -165,7 +167,7 @@ async function boot(){
   const saved = LS.get('awake_user');
   if(saved){ try{ await loginAs(JSON.parse(saved).name, true);}catch(e){ LS.del('awake_user'); } }
 }
-let _rz; window.addEventListener('resize',()=>{clearTimeout(_rz);_rz=setTimeout(()=>{ if(currentView==='session'&&currentTab==='stats'&&currentSession) renderStats(); },200);});
+let _rz; window.addEventListener('resize',()=>{clearTimeout(_rz);_rz=setTimeout(()=>{ if(currentView==='session'&&currentTab==='stats'&&currentSession) renderStats(true); },200);});
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); }); }
 applyLang('en');
 boot();
@@ -610,7 +612,7 @@ function renderLager(){
   const grid = document.getElementById('itemGrid');
   grid.innerHTML = items.length? items.map(it=>`
     <div class="item-card" onclick="openItemModal('${it.id}')">
-      <div class="thumb">${it.image?`<img src="${it.image}">`:'🏷️'}</div>
+      <div class="thumb">${itemImages(it)[0]?`<img src="${itemImages(it)[0]}">`:'🏷️'}${itemImages(it).length>1?`<span class="img-count">${itemImages(it).length}</span>`:''}</div>
       <span class="badge ${it.status}">${it.status}</span>
       <b>${it.name}</b>
       <div class="prices">EK ${it.buyPrice}€ · VK ${it.sellPrice}€ · ${it.platform}</div>
@@ -640,11 +642,54 @@ async function deleteFolder(id){
   renderLager();
 }
 
+/* ---------- item photos (several per item) ---------- */
+const MAX_ITEM_IMGS=5;
+let itImgs=[];
+function itemImages(it){ return (it&&it.images&&it.images.length)?it.images:(it&&it.image?[it.image]:[]); }
+function renderImgStrip(){
+  const el=document.getElementById('itImgStrip'); if(!el) return;
+  el.innerHTML = itImgs.map((src,i)=>`<div class="img-thumb" onclick="openLightbox(${i})">
+      <img src="${src}">
+      ${i===0?'<span class="cover-tag">Titelbild</span>':`<button type="button" class="cover-btn" title="Als Titelbild festlegen" onclick="event.stopPropagation();setCover(${i})">★</button>`}
+      <button type="button" class="img-del" onclick="event.stopPropagation();removeItemImage(${i})">✕</button>
+    </div>`).join('') + (itImgs.length<MAX_ITEM_IMGS?`<button type="button" class="img-add" onclick="document.getElementById('itImg').click()">+</button>`:'');
+}
+async function addItemImages(e){
+  const files=[...e.target.files]; e.target.value='';
+  for(const f of files){
+    if(itImgs.length>=MAX_ITEM_IMGS){ toast('Maximal 5 Bilder pro Artikel.'); break; }
+    const d=await readFileAsDataUrl(f); if(d) itImgs.push(d);
+  }
+  renderImgStrip();
+}
+function removeItemImage(i){ itImgs.splice(i,1); renderImgStrip(); }
+function setCover(i){ const [x]=itImgs.splice(i,1); itImgs.unshift(x); renderImgStrip(); }
+let lbIdx=0;
+function openLightbox(i){
+  lbIdx=i; closeLightbox();
+  const lb=document.createElement('div'); lb.id='lightbox'; lb.className='lightbox';
+  lb.onclick=e=>{ if(e.target===lb) closeLightbox(); };
+  document.body.appendChild(lb); drawLightbox();
+}
+function drawLightbox(){
+  const lb=document.getElementById('lightbox'); if(!lb) return;
+  const n=itImgs.length;
+  lb.innerHTML=`<img src="${itImgs[lbIdx]}">
+    ${n>1?`<button class="lb-nav lb-prev" onclick="lbStep(-1)">‹</button><button class="lb-nav lb-next" onclick="lbStep(1)">›</button><div class="lb-count">${lbIdx+1} / ${n}</div>`:''}
+    <button class="lb-close" onclick="closeLightbox()">✕</button>`;
+}
+function lbStep(d){ lbIdx=(lbIdx+d+itImgs.length)%itImgs.length; drawLightbox(); }
+function closeLightbox(){ const lb=document.getElementById('lightbox'); if(lb) lb.remove(); }
+
 function openItemModal(id){
   const it = id ? currentSession.items.find(i=>i.id===id) : null;
+  itImgs = itemImages(it).slice();
   showModal(`<h3>${it?'Artikel bearbeiten':'Artikel hinzufügen'}</h3>
     <div class="field"><label>Name</label><input id="itName" value="${it?it.name:''}"></div>
-    <div class="field"><label>Bild (optional)</label><input id="itImg" type="file" accept="image/*"></div>
+    <div class="field"><label>Bilder (optional)</label>
+      <div class="img-strip" id="itImgStrip"></div>
+      <input id="itImg" type="file" accept="image/*" multiple class="hidden" onchange="addItemImages(event)">
+    </div>
     <div class="field"><label>Ordner</label><select id="itFolder">
       <option value="">Kein Ordner</option>
       ${currentSession.folders.map(f=>`<option value="${f.id}" ${it&&it.folderId===f.id?'selected':''}>${f.name}</option>`).join('')}
@@ -661,6 +706,7 @@ function openItemModal(id){
       <button class="btn-small" style="color:var(--danger)" onclick="deleteItem('${it.id}')">Löschen</button>
     </div>`:''}
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" onclick="saveItem('${it?it.id:''}')">Speichern</button></div>`);
+  renderImgStrip();
 }
 async function saveItem(id){
   const name = document.getElementById('itName').value.trim();
@@ -669,17 +715,16 @@ async function saveItem(id){
   const buyPrice = parseFloat(document.getElementById('itBuy').value)||0;
   const sellPrice = parseFloat(document.getElementById('itSell').value)||0;
   const platform = document.getElementById('itPlatform').value;
-  const fileInput = document.getElementById('itImg');
-  let image = id ? (currentSession.items.find(i=>i.id===id)?.image||'') : '';
-  if(fileInput.files[0]) image = await readFileAsDataUrl(fileInput.files[0]);
+  const images = itImgs.slice(), image = images[0]||'';
   let items;
   if(id){
-    items = currentSession.items.map(i=> i.id===id ? {...i, name, folderId, buyPrice, sellPrice, platform, image} : i);
+    items = currentSession.items.map(i=> i.id===id ? {...i, name, folderId, buyPrice, sellPrice, platform, image, images} : i);
     addAudit(`hat den Artikel „${name}" bearbeitet`);
   } else {
-    items = [...currentSession.items, {id:'i'+Date.now(), name, folderId, buyPrice, sellPrice, platform, image, status:'lager', createdAt:Date.now()}];
+    items = [...currentSession.items, {id:'i'+Date.now(), name, folderId, buyPrice, sellPrice, platform, image, images, status:'lager', createdAt:Date.now()}];
     addAudit(`hat den Artikel „${name}" hinzugefügt`);
   }
+  if(JSON.stringify(items).length+JSON.stringify(currentSession.audit||[]).length > 900000){ toast('Die Session ist voll. Entferne Bilder oder alte Artikel.'); return; }  // Firestore doc limit ~1 MB
   await saveSession({items, audit:currentSession.audit});
   closeModal(); renderLager();
 }
@@ -699,7 +744,8 @@ async function deleteItem(id){
 }
 
 /* ---------- STATS ---------- */
-function renderStats(){
+let chartRun=0;
+function renderStats(noAnim){
   const items = currentSession.items;
   const sold = items.filter(i=>i.status==='verkauft');
   const profit = sold.reduce((s,i)=>s+(i.sellPrice-i.buyPrice),0);
@@ -707,39 +753,83 @@ function renderStats(){
   const body = document.getElementById('tabBody');
   body.innerHTML = `
     <div class="stat-grid">
-      <div class="stat-card"><div class="num">${sold.length}</div><div class="lbl">Produkte verkauft</div></div>
-      <div class="stat-card"><div class="num">${items.filter(i=>i.status==='lager').length}</div><div class="lbl">Produkte im Lager</div></div>
-      <div class="stat-card"><div class="num">${profit.toFixed(2)}€</div><div class="lbl">Profit</div></div>
-      <div class="stat-card"><div class="num">${umsatz.toFixed(2)}€</div><div class="lbl">Umsatz</div></div>
+      <div class="stat-card"><div class="num" data-v="${sold.length}" data-dec="0" data-suf="">${sold.length}</div><div class="lbl">Produkte verkauft</div></div>
+      <div class="stat-card"><div class="num" data-v="${items.filter(i=>i.status==='lager').length}" data-dec="0" data-suf="">${items.filter(i=>i.status==='lager').length}</div><div class="lbl">Produkte im Lager</div></div>
+      <div class="stat-card"><div class="num" data-v="${profit}" data-dec="2" data-suf="€">${profit.toFixed(2)}€</div><div class="lbl">Profit</div></div>
+      <div class="stat-card"><div class="num" data-v="${umsatz}" data-dec="2" data-suf="€">${umsatz.toFixed(2)}€</div><div class="lbl">Umsatz</div></div>
     </div>
     <div class="range-tabs" style="margin-bottom:14px">
       ${[7,14,30,'all'].map(r=>`<button class="${activeRange===r?'active':''}" onclick="activeRange=${typeof r==='string'?`'${r}'`:r};renderStats()">${r==='all'?'Alltime':r+' Tage'}</button>`).join('')}
     </div>
-    <div class="chart-card"><h4>Verkäufe</h4><canvas id="chSold" height="70"></canvas></div>
-    <div class="chart-card"><h4>Lagerbestand</h4><canvas id="chStock" height="70"></canvas></div>
-    <div class="chart-card"><h4>Profit</h4><canvas id="chProfit" height="70"></canvas></div>
-    <div class="chart-card"><h4>Umsatz</h4><canvas id="chRevenue" height="70"></canvas></div>`;
+    <div class="chart-card"><h4>Verkäufe</h4><canvas id="chSold"></canvas></div>
+    <div class="chart-card"><h4>Lagerbestand</h4><canvas id="chStock"></canvas></div>
+    <div class="chart-card"><h4>Profit</h4><canvas id="chProfit"></canvas></div>
+    <div class="chart-card"><h4>Umsatz</h4><canvas id="chRevenue"></canvas></div>`;
   const rangeDays = activeRange==='all' ? Math.max(1, Math.ceil((Date.now()-(currentSession.createdAt||Date.now()))/86400000)+1) : activeRange;
   const days=[...Array(rangeDays)].map((_,i)=>{ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-(rangeDays-1-i)); return d.getTime(); });
   const cum=(arr,valFn)=>{ let running=0; return days.map(dayTs=>{ const dayEnd=dayTs+86400000; running += arr.filter(i=>{const t=valFn.t(i); return t && t>=dayTs && t<dayEnd;}).reduce((s,i)=>s+valFn.v(i),0); return running; }); };
-  drawChart('chSold', cum(sold,{t:i=>i.soldAt,v:()=>1}), getComputedStyle(document.documentElement).getPropertyValue('--accent'));
+  const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const stockSeries = days.map(dayEnd=> items.filter(i=>i.createdAt<=dayEnd+86400000 && (i.status!=='verkauft' || i.soldAt>dayEnd+86400000)).length);
-  drawChart('chStock', stockSeries, getComputedStyle(document.documentElement).getPropertyValue('--accent2'));
-  drawChart('chProfit', cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice-i.buyPrice}), getComputedStyle(document.documentElement).getPropertyValue('--ok'));
-  drawChart('chRevenue', cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice}), '#8B6BFF');
+  const charts=[
+    {id:'chSold',    values:cum(sold,{t:i=>i.soldAt,v:()=>1}), color:css('--accent'), suf:'', dec:0},
+    {id:'chStock',   values:stockSeries, color:css('--accent2'), suf:'', dec:0},
+    {id:'chProfit',  values:cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice-i.buyPrice}), color:css('--ok'), suf:'€', dec:2},
+    {id:'chRevenue', values:cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice}), color:css('--accent2'), suf:'€', dec:2}
+  ];
+  animateStats(charts, !noAnim);
 }
-function drawChart(id, values, color){
-  const canvas = document.getElementById(id);
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width = canvas.offsetWidth; const h = canvas.height = 70;
+const _ease=t=>1-Math.pow(1-t,3);
+function animateStats(charts, animate){
+  const run=++chartRun, start=performance.now();
+  const nums=[...document.querySelectorAll('.stat-card .num')];
+  charts.forEach(c=>{ const cv=document.getElementById(c.id); const dpr=window.devicePixelRatio||1;
+    c.cv=cv; c.w=cv.offsetWidth; c.h=cv.offsetHeight; cv.width=Math.round(c.w*dpr); cv.height=Math.round(c.h*dpr); c.ctx=cv.getContext('2d'); c.ctx.setTransform(dpr,0,0,dpr,0,0);
+    c.border=css2('--border'); c.sub=css2('--sub'); });
+  function frame(now){
+    if(run!==chartRun) return;                       // a newer render took over
+    let busy=false;
+    charts.forEach((c,i)=>{
+      const t=animate?Math.min(1,Math.max(0,(now-start-i*110)/1000)):1;
+      drawChart(c,_ease(t)); if(t<1) busy=true;
+    });
+    const tn=animate?Math.min(1,(now-start)/900):1;
+    nums.forEach(n=>{ const v=parseFloat(n.dataset.v)||0; n.textContent=(v*_ease(tn)).toFixed(+n.dataset.dec)+n.dataset.suf; });
+    if(tn<1) busy=true;
+    if(busy) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+function css2(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+/* smooth, rounded area chart that grows up from the baseline (p = 0..1) */
+function drawChart(c,p){
+  const {ctx,w,h,values}=c, color=c.color||'#5B8CFF';
+  const padT=22, padB=10, padX=8, innerH=h-padT-padB;
   ctx.clearRect(0,0,w,h);
-  const max = Math.max(...values,1);
-  const step = w/(values.length-1||1);
-  ctx.beginPath();
-  values.forEach((v,i)=>{ const x=i*step; const y=h-6-(v/max)*(h-16); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  ctx.strokeStyle=color.trim()||'#5B8CFF'; ctx.lineWidth=2.5; ctx.lineJoin='round'; ctx.stroke();
-  ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath();
-  ctx.fillStyle=(color.trim()||'#5B8CFF')+'22'; ctx.fill();
+  // soft grid
+  ctx.save(); ctx.strokeStyle=c.border; ctx.globalAlpha=.55; ctx.lineWidth=1; ctx.setLineDash([3,5]);
+  [0,.5,1].forEach(g=>{ const y=padT+innerH*g; ctx.beginPath(); ctx.moveTo(padX,y); ctx.lineTo(w-padX,y); ctx.stroke(); });
+  ctx.restore();
+  const max=Math.max(...values,1), n=values.length, step=n>1?(w-padX*2)/(n-1):0;
+  const pts=values.map((v,i)=>({x:padX+i*step, y:padT+innerH-(v/max)*innerH*p}));
+  if(n===1) pts.push({x:w-padX,y:pts[0].y}), pts[0].x=padX;
+  const path=()=>{
+    ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length-1;i++){ const mx=(pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2; ctx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my); }
+    const l=pts[pts.length-1]; ctx.lineTo(l.x,l.y);
+  };
+  // gradient fill
+  path(); ctx.lineTo(pts[pts.length-1].x,h); ctx.lineTo(pts[0].x,h); ctx.closePath();
+  const g=ctx.createLinearGradient(0,padT,0,h); g.addColorStop(0,color+'55'); g.addColorStop(1,color+'00'); ctx.fillStyle=g; ctx.fill();
+  // line
+  path(); ctx.strokeStyle=color; ctx.lineWidth=3.5; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.shadowColor=color+'88'; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
+  // end dot
+  const e=pts[pts.length-1];
+  ctx.beginPath(); ctx.arc(e.x-3,e.y,6,0,Math.PI*2); ctx.fillStyle=color+'33'; ctx.fill();
+  ctx.beginPath(); ctx.arc(e.x-3,e.y,3.5,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+  // max label
+  ctx.fillStyle=c.sub; ctx.font='600 10.5px Inter, sans-serif'; ctx.textAlign='left';
+  ctx.fillText((max*p).toFixed(c.dec)+(c.suf||''),padX,padT-8);
 }
 
 /* ---------- AUDIT ---------- */

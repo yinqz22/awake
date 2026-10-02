@@ -1,6 +1,6 @@
 # awake
 
-Reselling-Plattform für dich und deine Freunde: Sessions, Lager mit Ordnern, Statistiken, Audit-Log, Freunde, 3 Sprachen (EN/DE/AR), 5 Themes + eigene Farben (Haupt- und Zweitfarbe), Animationen (Schneefall + eigene Emojis/Zeichen).
+Reselling-Plattform für dich und deine Freunde: Sessions, Lager mit Ordnern, Statistiken, Audit-Log, Freunde, 3 Sprachen (EN/DE/AR), 5 Themes + eigene Farben (Haupt- und Zweitfarbe), mehrere Bilder pro Artikel, Animationen (Schneefall + eigene Emojis/Zeichen).
 Läuft auf jedem Gerät (Handy, Tablet, Desktop). Enthält **keine** Nutzerdaten – die Datenbank startet leer.
 
 Die Daten liegen bei Firebase (Firestore), nicht in den Dateien. Wenn du die Website auf GitHub aktualisierst, bleiben alle Accounts, Sessions und Artikel erhalten.
@@ -34,4 +34,4 @@ Geänderte Dateien im Repo ersetzen (Add file → Upload files, gleiche Namen ü
 
 ## Wichtig zu wissen
 - Die Regeln erlauben jedem mit dem Website-Link Lesen/Schreiben (Login läuft in der App selbst, Passwörter werden als Hash gespeichert). Das reicht für einen Freundeskreis, ist aber kein Bankniveau. Für einen öffentlichen Dienst sollte später Firebase Authentication ergänzt werden.
-- Bilder werden automatisch verkleinert. Pro Session liegen Artikel und Audit-Log in einem Dokument (Firestore-Limit ca. 1 MB): mit Fotos passen grob 60 Artikel, ohne Fotos deutlich mehr.
+- Bilder werden automatisch verkleinert. Pro Session liegen Artikel und Audit-Log in einem Dokument (Firestore-Limit ca. 1 MB): mit Fotos passen grob 60 Artikel, ohne Fotos deutlich mehr. Mit mehreren Bildern pro Artikel (max. 5) wird es entsprechend früher voll; die App meldet es, bevor etwas verloren geht.
