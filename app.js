@@ -12,7 +12,6 @@ const THEMES=[
  {id:'dark',label:'Dark',c1:'#3A3D4D',c2:'#5B8CFF'},
  {id:'navy',label:'Navy',c1:'#101B33',c2:'#4C8DFF'},
  {id:'dark-red',label:'Dark Red',c1:'#2A1719',c2:'#E5484D'},
- {id:'nature-green',label:'Nature',c1:'#152119',c2:'#42C878'},
  {id:'noir',label:'Noir',c1:'#1A1A1A',c2:'#6E6E6E'}
 ];
 
@@ -73,6 +72,10 @@ const I18N=[
 ['Verlassen','Leave','مغادرة'],['Session gelöscht.','Session deleted.','تم حذف الجلسة.'],
 ['Du hast die Session verlassen.',"You've left the session.",'لقد غادرت الجلسة.'],
 ['Animation','Animation','الحركة'],['Aus','Off','إيقاف'],['Schneefall','Snowfall','تساقط الثلج'],
+['Hauptfarbe','Main color','اللون الرئيسي'],['Zweitfarbe','Second color','اللون الثانوي'],['Eigene Farben','Custom colors','ألوان مخصصة'],
+['Hauptfarbe = Hintergrund · Zweitfarbe = Buttons & Akzente','Main color = background · Second color = buttons & accents','اللون الرئيسي = الخلفية · اللون الثانوي = الأزرار والتمييز'],
+['Symbol hinzufügen','Add symbol','إضافة رمز'],['Emoji, Buchstabe oder Zahl','Emoji, letter or number','إيموجي أو حرف أو رقم'],['Hinzufügen','Add','إضافة'],
+['Bitte ein Zeichen eingeben.','Please enter a character.','يرجى إدخال رمز.'],['Dieses Symbol gibt es schon.','This symbol already exists.','هذا الرمز موجود بالفعل.'],['Maximal 12 eigene Symbole.','Maximum of 12 custom symbols.','الحد الأقصى 12 رمزًا مخصصًا.'],,
 ['Account löschen','Delete account','حذف الحساب'],['Account endgültig löschen','Permanently delete account','حذف الحساب نهائيًا'],
 ['Diese Aktion kann nicht rückgängig gemacht werden. Gib dein Passwort ein, um zu bestätigen.','This action cannot be undone. Enter your password to confirm.','لا يمكن التراجع عن هذا الإجراء. أدخل كلمة المرور للتأكيد.'],
 ['Bist du sicher, dass du dich abmelden willst?','Are you sure you want to log out?','هل أنت متأكد أنك تريد تسجيل الخروج؟'],
@@ -167,6 +170,16 @@ if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator
 applyLang('en');
 boot();
 
+/* ---------- no zoom, no copying (inputs and the copy button still work) ---------- */
+(function(){
+  const inField=e=>{ const t=e.target; const el=t&&t.nodeType===1?t:(t&&t.parentElement); return !!(el&&el.closest&&el.closest('input,textarea,select,[contenteditable=true]')); };
+  ['gesturestart','gesturechange','gestureend'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));   // iOS pinch
+  document.addEventListener('touchmove',e=>{ if(e.touches&&e.touches.length>1) e.preventDefault(); },{passive:false});               // 2-finger pinch
+  document.addEventListener('wheel',e=>{ if(e.ctrlKey) e.preventDefault(); },{passive:false});                                      // ctrl + wheel / trackpad pinch
+  document.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&['+','-','=','_','0'].includes(e.key)) e.preventDefault(); });
+  ['copy','cut','contextmenu','dragstart'].forEach(ev=>document.addEventListener(ev,e=>{ if(!inField(e)) e.preventDefault(); }));
+})();
+
 function switchTab(t){
   document.getElementById('tabLogin').classList.toggle('active',t==='login');
   document.getElementById('tabReg').classList.toggle('active',t==='register');
@@ -193,7 +206,7 @@ async function doRegister(e){
     const existing = await db.doc('users/'+safeId(name)).get();
     if(existing && existing.exists){ errEl.textContent='Dieser Name ist schon vergeben.'; return false; }
     const passHash = await sha256(pass);
-    const data = {name, passHash, avatar:'', lang:'en', theme:'dark', friends:[], incoming:[], outgoing:[], sessions:[], snow:false, createdAt:Date.now()};
+    const data = {name, passHash, avatar:'', lang:'en', theme:'dark', friends:[], incoming:[], outgoing:[], sessions:[], snow:false, anim:'off', customAnims:[], customColors:DEFAULT_CUSTOM, createdAt:Date.now()};
     await db.doc('users/'+safeId(name)).set(data);
     await loginAs(name);
   }catch(err){ errEl.textContent='Fehler: '+(err.message||err); }
@@ -222,7 +235,7 @@ async function loginAs(name, silent){
   LS.set('awake_user', JSON.stringify({name}));
   applyTheme(user.theme||'dark');
   applyLang(user.lang||'en');
-  applySnow(!!user.snow);
+  applyAnim(getAnim());
   subscribeMe();
   document.getElementById('auth').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -237,29 +250,77 @@ function confirmLogout(){
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="background:var(--danger)" onclick="logout()">Ja, abmelden</button></div>`);
 }
 
-function applyTheme(t){ document.documentElement.setAttribute('data-theme', t==='system'?'':t); }
+/* ---------- theme (incl. custom colors) ---------- */
+const THEME_IDS=['light','dark','navy','dark-red','noir','custom'];
+const CUSTOM_VARS=['--bg','--surface','--surface2','--text','--sub','--border','--accent','--accent2','--on-accent'];
+const DEFAULT_CUSTOM={main:'#1B1F3A',second:'#7C5CFF'};
+const _hex2rgb=h=>{h=h.replace('#','');return [0,2,4].map(i=>parseInt(h.substr(i,2),16));};
+const _rgb2hex=c=>'#'+c.map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+const _mix=(a,b,t)=>{const x=_hex2rgb(a),y=_hex2rgb(b);return _rgb2hex(x.map((v,i)=>v+(y[i]-v)*t));};
+const _lum=h=>{const [r,g,b]=_hex2rgb(h).map(v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);});return .2126*r+.7152*g+.0722*b;};
+function _shiftHue(hex,deg){
+  let [r,g,b]=_hex2rgb(hex).map(v=>v/255);
+  const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2,d=mx-mn; let h=0,sat=0;
+  if(d){ sat=l>.5?d/(2-mx-mn):d/(mx+mn); h=mx===r?((g-b)/d+(g<b?6:0)):mx===g?((b-r)/d+2):((r-g)/d+4); h*=60; }
+  h=(h+deg+360)%360;
+  const k=n=>(n+h/30)%12, a=sat*Math.min(l,1-l), f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  return _rgb2hex([f(0)*255,f(8)*255,f(4)*255]);
+}
+function customVars(c){
+  const main=c.main, second=c.second, dark=_lum(main)<.4;
+  const text=dark?'#F1E9D8':'#14161F';
+  return {
+    '--bg':main,
+    '--surface':_mix(main,dark?'#ffffff':'#000000',.06),
+    '--surface2':_mix(main,dark?'#ffffff':'#000000',.12),
+    '--border':_mix(main,dark?'#ffffff':'#000000',.2),
+    '--text':text,
+    '--sub':_mix(text,main,.45),
+    '--accent':second,
+    '--accent2':_shiftHue(second,28),
+    '--on-accent':_lum(second)>.45?'#14161F':'#F1E9D8'
+  };
+}
+function getCustom(){ return (user&&(user._pendingCustom||user.customColors))||DEFAULT_CUSTOM; }
+function applyTheme(t){
+  if(!THEME_IDS.includes(t)) t='dark';            // removed/unknown themes (e.g. "nature-green") fall back to dark
+  const root=document.documentElement;
+  root.setAttribute('data-theme',t);
+  CUSTOM_VARS.forEach(v=>root.style.removeProperty(v));
+  if(t==='custom'){ const vars=customVars(getCustom()); for(const k in vars) root.style.setProperty(k,vars[k]); }
+  requestAnimationFrame(()=>{ const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=getComputedStyle(document.body).backgroundColor; });
+}
 
+/* ---------- animation (snowfall + own symbols) ---------- */
+const MAX_CUSTOM_ANIMS=12;
+function getAnim(){ return (user&&user._pendingAnim)||(user&&user.anim)||(user&&user.snow?'snow':'off'); }
+function getCustomAnims(){ return (user&&(user._pendingAnims||user.customAnims))||[]; }
 let snowTimer=null;
-function startSnow(){
+function startSnow(sym){
   if(snowTimer) return;
   const layer=document.getElementById('snowLayer'); if(!layer) return;
+  const isFlake=!sym;
   snowTimer=setInterval(()=>{
     const f=document.createElement('span');
-    f.className='snowflake'; f.textContent='.';
+    f.className='snowflake'; f.textContent=isFlake?'.':sym;
     f.style.left=(Math.random()*100)+'%';
-    f.style.fontSize=(10+Math.random()*14)+'px';
-    f.style.opacity=(0.15+Math.random()*0.35).toFixed(2);
+    f.style.fontSize=(isFlake?10+Math.random()*14:16+Math.random()*14)+'px';
+    f.style.opacity=(isFlake?0.15+Math.random()*0.35:0.55+Math.random()*0.4).toFixed(2);
     const dur=6+Math.random()*6;
     f.style.animationDuration=dur+'s';
     layer.appendChild(f);
     setTimeout(()=>f.remove(), dur*1000+200);
-  }, 260);
+  }, isFlake?260:420);
 }
 function stopSnow(){
   if(snowTimer){ clearInterval(snowTimer); snowTimer=null; }
   const layer=document.getElementById('snowLayer'); if(layer) layer.innerHTML='';
 }
-function applySnow(on){ on ? startSnow() : stopSnow(); }
+function applyAnim(a){
+  stopSnow();
+  if(!a||a==='off') return;
+  startSnow(a==='snow'?null:a.slice(2));
+}
 
 function initials(n){ return (n||'?').slice(0,2).toUpperCase(); }
 
@@ -809,24 +870,92 @@ function renderSettings(){
 
     <h3>Theme</h3>
     <div class="theme-grid" id="themeGrid"></div>
+    <div class="custom-colors hidden" id="customColors">
+      <div class="color-row"><label for="colMain">Hauptfarbe</label><input type="color" id="colMain" oninput="pickCustomColor()"></div>
+      <div class="color-row"><label for="colSecond">Zweitfarbe</label><input type="color" id="colSecond" oninput="pickCustomColor()"></div>
+      <div class="hint" style="margin:0">Hauptfarbe = Hintergrund · Zweitfarbe = Buttons & Akzente</div>
+    </div>
 
     <h3>Animation</h3>
-    <div class="anim-grid" id="animGrid">
-      <div class="anim-opt ${!user.snow?'sel':''}" data-snow="0" onclick="pickSnow(false)"><span class="ic">✕</span>Aus</div>
-      <div class="anim-opt ${user.snow?'sel':''}" data-snow="1" onclick="pickSnow(true)"><span class="ic">·</span>Schneefall</div>
-    </div>
+    <div class="anim-grid" id="animGrid"></div>
 
     <button class="btn-primary" style="margin-top:26px" onclick="saveSettings()">Einstellungen speichern</button>
     <button class="btn-ghost" style="width:100%;margin-top:10px;color:var(--danger);border-color:var(--danger)" onclick="confirmLogout()">Abmelden</button>
     <button class="btn-ghost" style="width:100%;margin-top:10px;color:var(--danger);border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, transparent)" onclick="confirmDeleteAccount()">Account löschen</button>
   </div>`;
   const tg = document.getElementById('themeGrid');
-  tg.innerHTML = THEMES.map(t=>`<div class="theme-swatch ${user.theme===t.id?'sel':''}" data-theme-id="${t.id}" style="background:linear-gradient(135deg,${t.c1},${t.c2})" onclick="pickTheme('${t.id}')"></div>`).join('');
+  user._pendingTheme = undefined; user._pendingCustom = undefined; user._pendingAnim = undefined; user._pendingAnims = undefined;
+  applyTheme(user.theme||'dark'); applyAnim(getAnim());   // drop any unsaved preview from a previous visit
+  renderThemeGrid();
+  renderAnimGrid();
 }
-function pickSnow(on){
-  user._pendingSnow = on;
-  applySnow(on);
-  document.querySelectorAll('.anim-opt').forEach(el=>el.classList.toggle('sel', (el.dataset.snow==='1')===on));
+function renderThemeGrid(){
+  const tg = document.getElementById('themeGrid'); if(!tg) return;
+  const cur = user._pendingTheme || user.theme;
+  const c = getCustom();
+  tg.innerHTML = THEMES.map(t=>`<div class="theme-swatch ${cur===t.id?'sel':''}" data-theme-id="${t.id}" style="background:linear-gradient(135deg,${t.c1},${t.c2})" onclick="pickTheme('${t.id}')"></div>`).join('')
+    + `<div class="theme-swatch custom-sw ${cur==='custom'?'sel':''}" data-theme-id="custom" title="Eigene Farben" style="${cur==='custom'?`background:linear-gradient(135deg,${c.main},${c.second})`:''}" onclick="pickTheme('custom')">✎</div>`;
+  const box = document.getElementById('customColors');
+  if(box){
+    box.classList.toggle('hidden', cur!=='custom');
+    document.getElementById('colMain').value = c.main;
+    document.getElementById('colSecond').value = c.second;
+  }
+}
+function pickCustomColor(){
+  user._pendingCustom = {main:document.getElementById('colMain').value, second:document.getElementById('colSecond').value};
+  user._pendingTheme = 'custom';
+  applyTheme('custom');
+  const sw=document.querySelector('.theme-swatch.custom-sw');
+  if(sw){ const c=user._pendingCustom; sw.style.background=`linear-gradient(135deg,${c.main},${c.second})`; }
+}
+
+/* animation picker */
+function renderAnimGrid(){
+  const g=document.getElementById('animGrid'); if(!g) return;
+  const cur=getAnim(), list=getCustomAnims();
+  g.innerHTML =
+    `<div class="anim-opt ${cur==='off'?'sel':''}" onclick="pickAnim('off')"><span class="ic">✕</span>Aus</div>`+
+    `<div class="anim-opt ${cur==='snow'?'sel':''}" onclick="pickAnim('snow')"><span class="ic">·</span>Schneefall</div>`+
+    list.map((sym,i)=>`<div class="anim-opt ${cur==='c:'+sym?'sel':''}" onclick="pickAnim(${i},true)"><span class="ic">${esc(sym)}</span><button class="del" type="button" onclick="event.stopPropagation();deleteAnim(${i})">✕</button></div>`).join('')+
+    (list.length<MAX_CUSTOM_ANIMS?`<button class="anim-add" type="button" onclick="openAddSymbol()" title="Symbol hinzufügen">+</button>`:'');
+}
+function pickAnim(v,custom){
+  const list=getCustomAnims();
+  user._pendingAnim = custom ? 'c:'+list[v] : v;
+  applyAnim(user._pendingAnim);
+  renderAnimGrid();
+}
+function deleteAnim(i){
+  const list=[...getCustomAnims()]; const sym=list[i]; if(sym===undefined) return;
+  list.splice(i,1); user._pendingAnims=list;
+  if(getAnim()==='c:'+sym){ user._pendingAnim='snow'; applyAnim('snow'); }   // default snowfall itself can never be removed
+  renderAnimGrid();
+}
+const SYMBOLS=['❄️','⭐','❤️','🔥','🌸','🍂','🎃','💎','💸','👟','🎄','✨','🌧️','☀️','🍀','🦋','🎈','⚡','1','7','$','€','A','*'];
+function firstGrapheme(str){
+  str=(str||'').trim(); if(!str) return '';
+  if(window.Intl&&Intl.Segmenter){ const it=new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(str)[Symbol.iterator]().next(); return it.value?it.value.segment:''; }
+  return Array.from(str)[0]||'';
+}
+function openAddSymbol(){
+  showModal(`<h3>Symbol hinzufügen</h3>
+    <input class="sym-input" id="symInput" placeholder="Emoji, Buchstabe oder Zahl" autocomplete="off" oninput="this.value=firstGrapheme(this.value)">
+    <div class="sym-grid">${SYMBOLS.map((x,i)=>`<button type="button" onclick="document.getElementById('symInput').value=SYMBOLS[${i}]">${x}</button>`).join('')}</div>
+    <div class="err" id="symErr"></div>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="margin-top:0" onclick="addSymbolNow()">Hinzufügen</button></div>`);
+  setTimeout(()=>{ const i=document.getElementById('symInput'); if(i) i.focus(); },50);
+}
+function addSymbolNow(){
+  const sym=firstGrapheme(document.getElementById('symInput').value);
+  const err=document.getElementById('symErr');
+  const list=[...getCustomAnims()];
+  if(!sym){ err.textContent='Bitte ein Zeichen eingeben.'; return; }
+  if(sym==='.'||list.includes(sym)){ err.textContent='Dieses Symbol gibt es schon.'; return; }
+  if(list.length>=MAX_CUSTOM_ANIMS){ err.textContent='Maximal 12 eigene Symbole.'; return; }
+  list.push(sym); user._pendingAnims=list; user._pendingAnim='c:'+sym;
+  applyAnim(user._pendingAnim);
+  closeModal(); renderAnimGrid();
 }
 function confirmDeleteAccount(){
   showModal(`<h3>Account löschen</h3>
@@ -859,7 +988,7 @@ async function pickAvatar(e){
 function pickTheme(id){
   user._pendingTheme = id;
   applyTheme(id);
-  document.querySelectorAll('.theme-swatch').forEach(el=>el.classList.toggle('sel', el.dataset.themeId===id));
+  renderThemeGrid();
 }
 
 async function saveSettings(){
@@ -867,9 +996,11 @@ async function saveSettings(){
   const oldPass = document.getElementById('oldPass').value;
   const newPass = document.getElementById('newPass').value;
   const lang = document.getElementById('setLang').value;
-  const theme = user._pendingTheme || user.theme || 'light';
-  const snow = user._pendingSnow !== undefined ? user._pendingSnow : !!user.snow;
-  const updates = {lang, theme, snow};
+  const theme = THEME_IDS.includes(user._pendingTheme||user.theme) ? (user._pendingTheme||user.theme) : 'dark';
+  const anim = getAnim();
+  const customAnims = getCustomAnims();
+  const customColors = getCustom();
+  const updates = {lang, theme, anim, customAnims, customColors, snow: anim!=='off'};
 
   if(newName && newName !== user.name){
     if(newName.length<2){ toast('Name zu kurz.'); return; }
@@ -897,7 +1028,8 @@ async function saveSettings(){
   }
 
   await db.doc('users/'+user.id).update(updates);
-  user.lang = lang; user.theme = theme; user.snow = snow;
+  user.lang = lang; user.theme = theme; user.anim = anim; user.customAnims = customAnims; user.customColors = customColors; user.snow = anim!=='off';
+  user._pendingTheme = user._pendingCustom = user._pendingAnim = user._pendingAnims = undefined;
   renderTop();
   toast('Einstellungen gespeichert.');
 }

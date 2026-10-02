@@ -1,6 +1,6 @@
 # awake
 
-Reselling-Plattform für dich und deine Freunde: Sessions, Lager mit Ordnern, Statistiken, Audit-Log, Freunde, 3 Sprachen (EN/DE/AR), 5 Themes.
+Reselling-Plattform für dich und deine Freunde: Sessions, Lager mit Ordnern, Statistiken, Audit-Log, Freunde, 3 Sprachen (EN/DE/AR), 5 Themes + eigene Farben (Haupt- und Zweitfarbe), Animationen (Schneefall + eigene Emojis/Zeichen).
 Läuft auf jedem Gerät (Handy, Tablet, Desktop). Enthält **keine** Nutzerdaten – die Datenbank startet leer.
 
 Die Daten liegen bei Firebase (Firestore), nicht in den Dateien. Wenn du die Website auf GitHub aktualisierst, bleiben alle Accounts, Sessions und Artikel erhalten.
@@ -17,7 +17,7 @@ Die Daten liegen bei Firebase (Firestore), nicht in den Dateien. Wenn du die Web
 
 ## 3. Auf GitHub hochladen
 1. Auf https://github.com → **New repository** → Name z. B. `awake` → **Public** → Create.
-2. Auf der Repo-Seite **uploading an existing file** klicken und **alle Dateien aus diesem Ordner** hineinziehen (index.html, style.css, app.js, firebase-config.js, firestore.rules, README.md). Unten **Commit changes**.
+2. Auf der Repo-Seite **uploading an existing file** klicken und **alle Dateien aus diesem Ordner** hineinziehen (index.html, style.css, app.js, sw.js, manifest.json, firebase-config.js, firestore.rules, README.md und alle .png-Dateien). Unten **Commit changes**.
 3. **Settings → Pages** → Source: **Deploy from a branch** → Branch: `main`, Ordner: `/ (root)` → Save.
 4. Nach ca. 1 Minute ist die Seite erreichbar unter `https://DEIN-NAME.github.io/awake/`. Diesen Link schickst du deinen Freunden.
 

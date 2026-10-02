@@ -1,4 +1,4 @@
-const CACHE = 'awake-v1';
+const CACHE = 'awake-v2';
 const SHELL = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const SHELL = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png'
+
 ];
 
 self.addEventListener('install', e => {
