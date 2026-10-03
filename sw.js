@@ -1,10 +1,11 @@
-const CACHE = 'awake-v5';
+const CACHE = 'awake-v5-1';
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
   './workouts.js',
+  './ui.js',
   './workouts.css',
   './firebase-config.js',
   './manifest.json',

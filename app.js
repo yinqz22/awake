@@ -330,7 +330,7 @@ function renderTop(){
   const av = document.getElementById('topAvatar');
   av.innerHTML = user.avatar ? `<img src="${user.avatar}">` : initials(user.name);
   document.getElementById('topName').textContent = user.name;
-  document.getElementById('topMid').innerHTML = currentSession ? `<span class="sessionkey">${currentSession.key}<button class="copy-btn" onclick="copyKey()">⧉</button></span>` : '';
+  document.getElementById('topMid').innerHTML = currentSession ? `<span class="sessionkey">${currentSession.key}<button class="copy-btn" onclick="copyKey()" aria-label="Copy"><span class="ico-copy"></span></button></span>` : '';
 }
 function copyKey(){
   navigator.clipboard.writeText(currentSession.key).then(()=>toast('Session-ID kopiert.')).catch(()=>toast('Kopieren fehlgeschlagen.'));

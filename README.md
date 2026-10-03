@@ -49,6 +49,12 @@ Das Logo-Symbol in der Navigation öffnet den **awake Assistant**: Kugel, Umscha
 - Spricht oder hört awake gerade zu, stoppt ein **Klick auf die Kugel** sofort (Sprachausgabe/Mikrofon aus, Kugel zurück in Ruhe). Im Ruhezustand verhält sich die Kugel wie vorher.
 - Sprachbefehl **„Stop"** (auch „Stopp", „Halt"): während awake spricht, lauscht der Browser auf dieses Wort. Das geht nur, wenn das Mikrofon schon einmal erlaubt wurde (es erscheint nie eine neue Berechtigungsfrage). Abschaltbar mit `AI_STOP_VOICE=false` in `app.js`.
 
+## Design v5.1
+- Kopfzeile bleibt oben, wird beim Scrollen kompakter und leicht durchsichtig (Glas-Effekt).
+- Die Navigation ist eine schwebende Glas-Blase am unteren Rand (Handy und Desktop), der Inhalt scrollt darunter weiter.
+- Neuer Kopieren-Button (Icon wie vorgegeben), Funktion unverändert.
+- `404.html`: professionelle 404-Seite für jede nicht vorhandene Adresse (GitHub Pages zeigt sie automatisch). `ui.js` enthält die Kopfzeilen-Animation und die Weiterleitung bekannter Routen (z. B. `/admin`) – ohne freigeschaltete Route sieht jeder die 404-Seite.
+
 ## Updates
 Geänderte Dateien im Repo ersetzen (Add file → Upload files, gleiche Namen überschreiben). Die Daten bleiben in Firebase erhalten.
 

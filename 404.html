@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0E0F14">
+<title>404 – Page not found · awake</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--accent:#5B8CFF;--accent2:#8B6BFF;--bg:#0E0F14;--text:#F1E9D8;--sub:#8C90A3;--on-accent:#F1E9D8}
+@media (prefers-color-scheme:light){:root{--bg:#F3EDE0;--text:#14161F;--sub:#756F60}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;-webkit-user-select:none;user-select:none}
+.code{font-family:Manrope,sans-serif;font-weight:800;font-size:clamp(90px,24vw,170px);line-height:1;letter-spacing:-.05em;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;animation:pop .6s cubic-bezier(.3,1.4,.4,1) both}
+h1{font-family:Manrope,sans-serif;margin:6px 0 8px;font-size:26px;font-weight:800;letter-spacing:-.02em;animation:up .5s .1s both}
+p{margin:0 0 28px;color:var(--sub);font-size:15px;animation:up .5s .18s both}
+a{display:inline-flex;align-items:center;gap:8px;min-height:52px;padding:0 26px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--on-accent);font-weight:800;font-size:15px;text-decoration:none;transition:transform .15s,opacity .2s;animation:up .5s .26s both}
+a:hover{opacity:.92}a:active{transform:scale(.97)}
+@keyframes pop{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:none}}
+@keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div>
+  <div class="code">404</div>
+  <h1>Page not found</h1>
+  <p>This page does not exist or you do not have access to it.</p>
+  <a id="home" href="./">← Back to homepage</a>
+</div>
+<script>
+/* GitHub Pages serves this file for every unknown address. Works for project sites (…github.io/awake/…) and root sites. */
+(function(){
+  var REPO='awake', parts=location.pathname.split('/').filter(Boolean);
+  var base=(parts[0]===REPO)?'/'+REPO+'/':'/';
+  var rest=parts.slice(base==='/'?0:1);
+  document.getElementById('home').href=base;
+  // known app routes are handed to the app, which decides what to show (admin pages are never shown to normal users)
+  if(rest[0]==='admin'){ location.replace(base+'?r=admin'); }
+})();
+</script>
+</body>
+</html>
