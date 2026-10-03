@@ -338,13 +338,16 @@ function copyKey(){
 
 function showView(v){
   if(currentView==='assistant'&&v!=='assistant') aiLeave();
+  if(currentView==='workouts'&&v!=='workouts'&&typeof wkLeave==='function') wkLeave();
   currentView=v;
   document.getElementById('navHome').classList.toggle('active', v==='home'||v==='session');
   document.getElementById('navSettings').classList.toggle('active', v==='settings');
   const na=document.getElementById('navAssistant'); if(na) na.classList.toggle('active', v==='assistant');
+  const nw=document.getElementById('navWorkouts'); if(nw) nw.classList.toggle('active', v==='workouts');
   if(v==='home'){ currentSession=null; renderTop(); renderHome(); }
   if(v==='settings'){ renderSettings(); }
   if(v==='assistant'){ currentSession=null; renderTop(); renderAssistant(); }
+  if(v==='workouts'){ currentSession=null; renderTop(); if(typeof wkRender==='function') wkRender(); }
 }
 
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
@@ -774,65 +777,158 @@ function renderStats(noAnim){
   const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const stockSeries = days.map(dayEnd=> items.filter(i=>i.createdAt<=dayEnd+86400000 && (i.status!=='verkauft' || i.soldAt>dayEnd+86400000)).length);
   const charts=[
-    {id:'chSold',    values:cum(sold,{t:i=>i.soldAt,v:()=>1}), color:css('--accent'), suf:'', dec:0},
-    {id:'chStock',   values:stockSeries, color:css('--accent2'), suf:'', dec:0},
-    {id:'chProfit',  values:cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice-i.buyPrice}), color:css('--ok'), suf:'€', dec:2},
-    {id:'chRevenue', values:cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice}), color:css('--accent2'), suf:'€', dec:2}
+    {id:'chSold',    values:cum(sold,{t:i=>i.soldAt,v:()=>1}), ts:days, color:css('--accent'), name:'Verkäufe', suf:'', dec:0},
+    {id:'chStock',   values:stockSeries, ts:days, color:css('--accent2'), name:'Lagerbestand', suf:'', dec:0},
+    {id:'chProfit',  values:cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice-i.buyPrice}), ts:days, color:css('--ok'), name:'Profit', suf:'€', dec:2},
+    {id:'chRevenue', values:cum(sold,{t:i=>i.soldAt,v:i=>i.sellPrice}), ts:days, color:css('--accent2'), name:'Umsatz', suf:'€', dec:2}
   ];
   animateStats(charts, !noAnim);
 }
+/* ---------- interactive charts: hover (desktop) + touch/drag (phone) ----------
+   awChart(canvas,{values,ts?,labels?,color,type:'line'|'bar',zero:true|false,fmt,name,delay,animate,empty})  */
 const _ease=t=>1-Math.pow(1-t,3);
+function css2(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function awLocale(){ return curLang==='de'?'de-DE':curLang==='ar'?'ar-EG-u-nu-latn':'en-GB'; }
+function awNum(v,dec){ try{ return new Intl.NumberFormat(awLocale(),{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0}).format(v); }catch(e){ return (+v).toFixed(dec||0); } }
+function awDate(ts){ try{ return new Date(ts).toLocaleDateString(awLocale(),{day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return new Date(ts).toLocaleDateString(); } }
+function awDateShort(ts){ try{ return new Date(ts).toLocaleDateString(awLocale(),{day:'2-digit',month:'2-digit'}); }catch(e){ return ''; } }
+const AW_ACTIVE=new Set(); let awRaf=0, awLast=0;
+function awKick(c){ AW_ACTIVE.add(c); if(!awRaf) awRaf=requestAnimationFrame(awLoop); }
+function awLoop(now){
+  awRaf=0; const dt=Math.min(.05,awLast?(now-awLast)/1000:.016); awLast=now;
+  AW_ACTIVE.forEach(c=>{ if(!c.cv.isConnected){ AW_ACTIVE.delete(c); return; } if(!awStep(c,now,dt)) AW_ACTIVE.delete(c); });
+  if(AW_ACTIVE.size) awRaf=requestAnimationFrame(awLoop); else awLast=0;
+}
+function awChart(cv,cfg){
+  let c=cv._aw;
+  if(!c){
+    c=cv._aw={cv,hi:-1,ha:0,hx:0,t0:performance.now(),p:0};
+    cv.style.touchAction='pan-y';
+    const idxAt=e=>{ const r=cv.getBoundingClientRect(); return awNearest(c,e.clientX-r.left); };
+    const show=e=>{ clearTimeout(c.hideT); const i=idxAt(e); if(i!==c.hi){ if(c.hi<0) c.hx=awX(c,i); c.hi=i; awKick(c); } };
+    const hide=()=>{ c.hi=-1; awKick(c); };
+    cv.addEventListener('pointermove',e=>{ if(e.pointerType==='mouse'||c.touching) show(e); });
+    cv.addEventListener('pointerdown',e=>{ if(e.pointerType!=='mouse'){ c.touching=true; show(e); } });
+    const up=e=>{ if(e.pointerType==='mouse') return; c.touching=false; clearTimeout(c.hideT); c.hideT=setTimeout(hide,1600); };
+    cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+    cv.addEventListener('pointerleave',e=>{ if(e.pointerType==='mouse') hide(); });
+  }
+  Object.assign(c,{values:[],ts:null,labels:null,color:'#5B8CFF',type:'line',zero:true,fmt:v=>awNum(v,0),name:'',delay:0,animate:true,empty:''},cfg);
+  const dpr=window.devicePixelRatio||1;
+  c.w=cv.clientWidth||cv.offsetWidth||300; c.h=cv.clientHeight||cv.offsetHeight||130;
+  cv.width=Math.round(c.w*dpr); cv.height=Math.round(c.h*dpr);
+  c.ctx=cv.getContext('2d'); c.ctx.setTransform(dpr,0,0,dpr,0,0);
+  c.padT=24; c.padB=22; c.padX=12; c.innerH=c.h-c.padT-c.padB;
+  c.border=css2('--border'); c.sub=css2('--sub'); c.txt=css2('--text'); c.bg=css2('--bg');
+  const n=c.values.length;
+  if(c.zero){ c.min=0; c.max=Math.max(...c.values,1); }
+  else if(n){ let lo=Math.min(...c.values), hi=Math.max(...c.values); if(hi-lo<1e-9){ lo-=1; hi+=1; } const pad=(hi-lo)*.15; c.min=lo-pad; c.max=hi+pad; }
+  else { c.min=0; c.max=1; }
+  c.t0=performance.now(); c.p=c.animate?0:1; c.hi=-1; c.ha=0;
+  awKick(c); return c;
+}
+function awX(c,i){
+  const n=c.values.length, W=c.w-c.padX*2;
+  if(c.type==='bar') return c.padX+W*(i+.5)/n;
+  if(n<2) return c.padX+W/2;
+  if(c.ts){ const t0=c.ts[0], t1=c.ts[n-1]; return t1>t0?c.padX+W*(c.ts[i]-t0)/(t1-t0):c.padX+W*i/(n-1); }
+  return c.padX+W*i/(n-1);
+}
+function awNearest(c,x){ let best=-1,bd=1e9; for(let i=0;i<c.values.length;i++){ const d=Math.abs(awX(c,i)-x); if(d<bd){ bd=d; best=i; } } return best; }
+function awY(c,v,p){ return c.padT+c.innerH-((v-c.min)/(c.max-c.min))*c.innerH*p; }
+/* monotone cubic tangents -> curve passes exactly through every point, never overshoots */
+function awTangents(pts){
+  const n=pts.length, d=[], m=[];
+  for(let i=0;i<n-1;i++) d.push((pts[i+1].y-pts[i].y)/((pts[i+1].x-pts[i].x)||1));
+  m[0]=d[0]||0; m[n-1]=d[n-2]||0;
+  for(let i=1;i<n-1;i++) m[i]=d[i-1]*d[i]<=0?0:(d[i-1]+d[i])/2;
+  for(let i=0;i<n-1;i++){ if(d[i]===0){ m[i]=0; m[i+1]=0; continue; } const a=m[i]/d[i], b=m[i+1]/d[i], s=a*a+b*b; if(s>9){ const t=3/Math.sqrt(s); m[i]=t*a*d[i]; m[i+1]=t*b*d[i]; } }
+  return m;
+}
+function awCurveY(pts,m,x){
+  if(x<=pts[0].x) return pts[0].y; const n=pts.length; if(x>=pts[n-1].x) return pts[n-1].y;
+  let i=0; while(i<n-2&&x>pts[i+1].x) i++;
+  const h=pts[i+1].x-pts[i].x||1, t=(x-pts[i].x)/h, t2=t*t, t3=t2*t;
+  return (2*t3-3*t2+1)*pts[i].y+(t3-2*t2+t)*h*m[i]+(-2*t3+3*t2)*pts[i+1].y+(t3-t2)*h*m[i+1];
+}
+function awStep(c,now,dt){
+  let busy=false;
+  if(c.p<1){ c.p=Math.min(1,Math.max(0,(now-c.t0-c.delay)/(c.animate?950:1))); busy=true; if(!c.animate) c.p=1; }
+  const ta=c.hi>=0?1:0; c.ha+=(ta-c.ha)*Math.min(1,dt*16); if(Math.abs(ta-c.ha)<.01) c.ha=ta; else busy=true;
+  if(c.hi>=0){ const tx=awX(c,c.hi); c.hx+=(tx-c.hx)*Math.min(1,dt*20); if(Math.abs(tx-c.hx)>.2) busy=true; else c.hx=tx; }
+  awDraw(c,_ease(c.p));
+  return busy||c.ha>0&&c.ha<1;
+}
+function awRR(ctx,x,y,w,h,r){ r=Math.min(r,w/2,h/2); ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function awDraw(c,p){
+  const {ctx,w,h,values,color}=c, n=values.length, bottom=c.padT+c.innerH;
+  ctx.clearRect(0,0,w,h);
+  ctx.save(); ctx.strokeStyle=c.border; ctx.globalAlpha=.55; ctx.lineWidth=1; ctx.setLineDash([3,5]);
+  [0,.5,1].forEach(g=>{ const y=c.padT+c.innerH*g; ctx.beginPath(); ctx.moveTo(c.padX,y); ctx.lineTo(w-c.padX,y); ctx.stroke(); });
+  ctx.restore();
+  ctx.font='600 10.5px Inter, sans-serif'; ctx.fillStyle=c.sub;
+  if(!n){ ctx.textAlign='center'; ctx.fillText(tr(c.empty||'Noch keine Daten'),w/2,c.padT+c.innerH/2+4); return; }
+  ctx.textAlign='left'; ctx.fillText(c.fmt(c.min+(c.max-c.min)*p),c.padX,c.padT-9);
+  // x labels
+  const xl=c.xl||(c.ts?[awDateShort(c.ts[0]),awDateShort(c.ts[n-1])]:null);
+  if(xl){ ctx.textAlign='left'; ctx.fillText(xl[0],c.padX,h-6); if(n>1){ ctx.textAlign='right'; ctx.fillText(xl[1],w-c.padX,h-6); } }
+  const hi=c.hi>=0?c.hi:null;
+  if(c.type==='bar'){
+    const slot=(w-c.padX*2)/n, bw=Math.max(2,Math.min(26,slot*.62));
+    for(let i=0;i<n;i++){
+      const y=awY(c,values[i],p), bh=bottom-y; if(bh<.5) continue;
+      const act=hi===i?c.ha:0; ctx.globalAlpha=.55+.45*act;
+      const g=ctx.createLinearGradient(0,y,0,bottom); g.addColorStop(0,color); g.addColorStop(1,color+'88'); ctx.fillStyle=g;
+      awRR(ctx,awX(c,i)-bw/2,y,bw,bh,Math.min(7,bw/2)); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  } else {
+    let pts=values.map((v,i)=>({x:awX(c,i),y:awY(c,v,p)}));
+    if(n===1) pts=[{x:c.padX,y:pts[0].y},{x:w-c.padX,y:pts[0].y}];
+    const m=awTangents(pts);
+    const path=()=>{ ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y); for(let i=0;i<pts.length-1;i++){ const dx=(pts[i+1].x-pts[i].x)/3; ctx.bezierCurveTo(pts[i].x+dx,pts[i].y+m[i]*dx,pts[i+1].x-dx,pts[i+1].y-m[i+1]*dx,pts[i+1].x,pts[i+1].y); } };
+    path(); ctx.lineTo(pts[pts.length-1].x,bottom); ctx.lineTo(pts[0].x,bottom); ctx.closePath();
+    const g=ctx.createLinearGradient(0,c.padT,0,bottom); g.addColorStop(0,color+'55'); g.addColorStop(1,color+'00'); ctx.fillStyle=g; ctx.fill();
+    path(); ctx.strokeStyle=color; ctx.lineWidth=3.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.shadowColor=color+'88'; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
+    const e=pts[pts.length-1], fade=1-c.ha*.7;
+    ctx.globalAlpha=fade; ctx.beginPath(); ctx.arc(e.x-(n>1?3:-0),e.y,6,0,6.283); ctx.fillStyle=color+'33'; ctx.fill(); ctx.beginPath(); ctx.arc(e.x-(n>1?3:0),e.y,3.5,0,6.283); ctx.fillStyle=color; ctx.fill(); ctx.globalAlpha=1;
+    c._pts=pts; c._m=m;
+  }
+  if(c.ha>0.01&&hi!==null) awTip(c,p);
+}
+function awTip(c,p){
+  const {ctx,w}=c, i=c.hi, v=c.values[i], x=c.hx;
+  let y; if(c.type==='bar') y=awY(c,v,p); else y=awCurveY(c._pts,c._m,x);
+  ctx.save(); ctx.globalAlpha=c.ha;
+  if(c.type!=='bar'){
+    ctx.strokeStyle=c.color+'88'; ctx.lineWidth=1.5; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(x,c.padT-4); ctx.lineTo(x,c.padT+c.innerH); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x,y,9,0,6.283); ctx.fillStyle=c.color+'33'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,5.5,0,6.283); ctx.fillStyle=c.bg; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=c.color; ctx.stroke();
+  }
+  const date=c.labels?c.labels[i]:(c.ts?awDate(c.ts[i]):''), line=`${tr(c.name)}: ${c.fmt(v)}`;
+  ctx.font='600 11px Inter, sans-serif'; const w1=ctx.measureText(date).width;
+  ctx.font='700 12.5px Inter, sans-serif'; const w2=ctx.measureText(line).width;
+  const bw=Math.max(w1,w2)+22, bh=date?44:28; let bx=x-bw/2; bx=Math.max(4,Math.min(w-bw-4,bx));
+  let by=y-bh-16; if(by<2) by=y+16;
+  ctx.shadowColor='rgba(0,0,0,.28)'; ctx.shadowBlur=14; ctx.shadowOffsetY=4;
+  ctx.fillStyle=c.txt; awRR(ctx,bx,by,bw,bh,11); ctx.fill(); ctx.shadowColor='transparent';
+  ctx.fillStyle=c.bg; ctx.textAlign='left';
+  if(date){ ctx.globalAlpha=c.ha*.7; ctx.font='600 11px Inter, sans-serif'; ctx.fillText(date,bx+11,by+17); ctx.globalAlpha=c.ha; ctx.font='700 12.5px Inter, sans-serif'; ctx.fillText(line,bx+11,by+34); }
+  else { ctx.font='700 12.5px Inter, sans-serif'; ctx.fillText(line,bx+11,by+18); }
+  ctx.restore();
+}
 function animateStats(charts, animate){
-  const run=++chartRun, start=performance.now();
-  const nums=[...document.querySelectorAll('.stat-card .num')];
-  charts.forEach(c=>{ const cv=document.getElementById(c.id); const dpr=window.devicePixelRatio||1;
-    c.cv=cv; c.w=cv.offsetWidth; c.h=cv.offsetHeight; cv.width=Math.round(c.w*dpr); cv.height=Math.round(c.h*dpr); c.ctx=cv.getContext('2d'); c.ctx.setTransform(dpr,0,0,dpr,0,0);
-    c.border=css2('--border'); c.sub=css2('--sub'); });
+  const run=++chartRun;
+  const nums=[...document.querySelectorAll('.stat-card .num')], start=performance.now();
+  charts.forEach((c,i)=>{ const cv=document.getElementById(c.id); if(!cv) return;
+    awChart(cv,{values:c.values,ts:c.ts,color:c.color,zero:true,name:c.name,fmt:v=>awNum(v,c.dec)+(c.suf||''),delay:i*110,animate}); });
   function frame(now){
-    if(run!==chartRun) return;                       // a newer render took over
-    let busy=false;
-    charts.forEach((c,i)=>{
-      const t=animate?Math.min(1,Math.max(0,(now-start-i*110)/1000)):1;
-      drawChart(c,_ease(t)); if(t<1) busy=true;
-    });
+    if(run!==chartRun) return;
     const tn=animate?Math.min(1,(now-start)/900):1;
     nums.forEach(n=>{ const v=parseFloat(n.dataset.v)||0; n.textContent=(v*_ease(tn)).toFixed(+n.dataset.dec)+n.dataset.suf; });
-    if(tn<1) busy=true;
-    if(busy) requestAnimationFrame(frame);
+    if(tn<1) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-}
-function css2(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
-/* smooth, rounded area chart that grows up from the baseline (p = 0..1) */
-function drawChart(c,p){
-  const {ctx,w,h,values}=c, color=c.color||'#5B8CFF';
-  const padT=22, padB=10, padX=8, innerH=h-padT-padB;
-  ctx.clearRect(0,0,w,h);
-  // soft grid
-  ctx.save(); ctx.strokeStyle=c.border; ctx.globalAlpha=.55; ctx.lineWidth=1; ctx.setLineDash([3,5]);
-  [0,.5,1].forEach(g=>{ const y=padT+innerH*g; ctx.beginPath(); ctx.moveTo(padX,y); ctx.lineTo(w-padX,y); ctx.stroke(); });
-  ctx.restore();
-  const max=Math.max(...values,1), n=values.length, step=n>1?(w-padX*2)/(n-1):0;
-  const pts=values.map((v,i)=>({x:padX+i*step, y:padT+innerH-(v/max)*innerH*p}));
-  if(n===1) pts.push({x:w-padX,y:pts[0].y}), pts[0].x=padX;
-  const path=()=>{
-    ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
-    for(let i=1;i<pts.length-1;i++){ const mx=(pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2; ctx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my); }
-    const l=pts[pts.length-1]; ctx.lineTo(l.x,l.y);
-  };
-  // gradient fill
-  path(); ctx.lineTo(pts[pts.length-1].x,h); ctx.lineTo(pts[0].x,h); ctx.closePath();
-  const g=ctx.createLinearGradient(0,padT,0,h); g.addColorStop(0,color+'55'); g.addColorStop(1,color+'00'); ctx.fillStyle=g; ctx.fill();
-  // line
-  path(); ctx.strokeStyle=color; ctx.lineWidth=3.5; ctx.lineCap='round'; ctx.lineJoin='round';
-  ctx.shadowColor=color+'88'; ctx.shadowBlur=10; ctx.stroke(); ctx.shadowBlur=0;
-  // end dot
-  const e=pts[pts.length-1];
-  ctx.beginPath(); ctx.arc(e.x-3,e.y,6,0,Math.PI*2); ctx.fillStyle=color+'33'; ctx.fill();
-  ctx.beginPath(); ctx.arc(e.x-3,e.y,3.5,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
-  // max label
-  ctx.fillStyle=c.sub; ctx.font='600 10.5px Inter, sans-serif'; ctx.textAlign='left';
-  ctx.fillText((max*p).toFixed(c.dec)+(c.suf||''),padX,padT-8);
 }
 
 /* ---------- AUDIT ---------- */
@@ -1067,6 +1163,7 @@ async function deleteAccountNow(){
       if(td.exists) await db.doc('users/'+tid).update({friends:(td.data().friends||[]).filter(n=>n!==user.name)});
     }catch(e){}
   }));
+  try{ if(typeof wkDeleteAll==='function') await wkDeleteAll(); }catch(e){}
   await db.doc('users/'+user.id).delete();
   LS.del('awake_user');
   location.reload();
@@ -1259,7 +1356,7 @@ function renderAssistant(){
       <button type="button" id="aiBtnText" class="${AI.mode==='text'?'on':''}" onclick="aiSetMode('text')">${AI_SVG.chat}<span>Text</span></button>
       <button type="button" id="aiBtnVoice" class="${AI.mode==='voice'?'on':''}" onclick="aiSetMode('voice')">${AI_SVG.voice}<span>Voice</span></button>
     </div>
-    <div class="ai-orb" id="aiOrb">
+    <div class="ai-orb" id="aiOrb" onclick="aiOrbTap()">
       <div class="ai-aura" id="aiAura"></div>
       <div class="ai-ring r1"></div><div class="ai-ring r2"></div>
       <div class="ai-sphere" id="aiSphere"><i class="ai-blob b1"></i><i class="ai-blob b2"></i><i class="ai-blob b3"></i><i class="ai-blob b4"></i><span class="ai-sheen"></span><span class="ai-logo"></span></div>
@@ -1290,7 +1387,7 @@ function renderAssistant(){
 function aiLeave(){
   cancelAnimationFrame(AI.raf); AI.raf=0;
   if(AI.rec){ const r=AI.rec; AI.rec=null; r.onend=r.onresult=r.onerror=null; try{r.abort();}catch(e){} }
-  aiStopOutput(); aiClosePopup(true); AI.phase='idle';
+  aiStopOutput(); aiEndStopListener(); aiClosePopup(true); AI.phase='idle';
 }
 
 /* orb: JS-driven so it reacts instantly to the speech state */
@@ -1323,8 +1420,10 @@ function aiFrame(t){
 }
 function aiSetPhase(p){
   AI.phase=p;
+  aiSyncStopListener();
   const orb=document.getElementById('aiOrb'); if(!orb) return;
   orb.classList.toggle('listening',p==='listening');
+  orb.classList.toggle('stoppable',p!=='idle');
   const mic=document.getElementById('aiMic'); if(mic) mic.classList.toggle('on',p==='listening');
   const st=document.getElementById('aiStatus'); if(st) st.textContent=aiT().status[p]||'';
 }
@@ -1360,7 +1459,7 @@ function aiToggleMic(){
   aiCloseMenu(); aiStopOutput(); aiClosePopup(true);
   const r=new SR(); r.lang=AI_LOC[curLang]||'en-US'; r.interimResults=true; r.continuous=false; r.maxAlternatives=1;
   let fin='', interim='';
-  r.onstart=()=>{ aiCaption(''); aiSetPhase('listening'); };
+  r.onstart=()=>{ LS.set('awake_ai_micok','1'); aiCaption(''); aiSetPhase('listening'); };
   r.onresult=e=>{
     interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){ const R=e.results[i]; if(R.isFinal) fin+=R[0].transcript; else interim+=R[0].transcript; }
@@ -1384,6 +1483,7 @@ function aiToggleMic(){
 const aiSleep=ms=>new Promise(r=>setTimeout(r,ms));
 function aiClean(raw){ return String(raw||'').replace(/^\s*(?:hey|hallo|hi|hello|ok|okay)?[\s,]*awake\b[\s,.!:;-]*/i,'').trim(); }
 async function aiAsk(raw){
+  if(aiIsStop(raw)){ aiHardStop(); return; }   // spoken/typed "stop" is a command, not a question
   const woke=/^\s*(?:hey|hallo|hi|hello|ok|okay)?[\s,]*awake\b/i.test(String(raw||''));
   let q=aiClean(raw); if(!q&&woke) q='hallo'; if(!q) return;
   aiStopOutput(); aiClosePopup(true);
@@ -1400,6 +1500,54 @@ async function aiAsk(raw){
   aiSetPhase('idle'); aiShowPopup(q,ans);
 }
 function aiStopOutput(){ AI.run++; try{ if('speechSynthesis' in window) speechSynthesis.cancel(); }catch(e){} }
+
+
+/* ---------- stop controls: tap the orb / say "stop" ---------- */
+const AI_STOP_VOICE=true;   // false = disable the "stop" voice command while awake speaks (orb tap always works)
+const AI_STOP_RE=/^[\s,.!?¡¿-]*(?:(?:hey|hallo|hi|ok|okay)[\s,]+)?(?:awake[\s,]+)?(?:stop|stopp|stoppen|stopp es|halt|hör auf|hoer auf|aufhören|aufhoeren|ruhe|pause|genug|قف|توقف|كفى)[\s,.!?]*$/i;
+function aiIsStop(t){ return AI_STOP_RE.test(String(t||'')); }
+function aiAbortRec(){
+  if(AI.rec){ const r=AI.rec; AI.rec=null; r.onend=r.onresult=r.onerror=r.onstart=null; try{ r.abort(); }catch(e){} }
+}
+function aiHardStop(){
+  aiStopOutput();            // cancels speech + invalidates any running answer
+  aiAbortRec();              // mic off
+  aiClosePopup(true);
+  aiCaption('');
+  aiSetPhase('idle');
+}
+function aiOrbTap(){
+  if(AI.phase==='idle') return;          // nothing running: orb behaves as before
+  aiHardStop();
+}
+/* while awake speaks, a light listener waits for the word "stop" (only if the mic was already allowed) */
+function aiSyncStopListener(){
+  if(AI.phase==='speaking'&&AI_STOP_VOICE) aiStartStopListener(); else aiEndStopListener();
+}
+function aiEndStopListener(){
+  if(AI.stopRec){ const r=AI.stopRec; AI.stopRec=null; r.onend=r.onresult=r.onerror=null; try{ r.abort(); }catch(e){} }
+}
+async function aiStartStopListener(){
+  if(AI.stopRec||AI.stopBlocked) return;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR) return;
+  try{
+    let ok=LS.get('awake_ai_micok')==='1';
+    if(navigator.permissions&&navigator.permissions.query){
+      try{ const st=await navigator.permissions.query({name:'microphone'}); if(st.state==='denied'){ AI.stopBlocked=true; return; } if(st.state==='granted') ok=true; }catch(e){}
+    }
+    if(!ok||AI.phase!=='speaking'||AI.stopRec) return;        // never trigger a new permission prompt
+    const r=new SR(); r.lang=AI_LOC[curLang]||'en-US'; r.continuous=true; r.interimResults=true; r.maxAlternatives=1;
+    r.onresult=e=>{
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const tx=e.results[i][0].transcript||'';
+        if(aiIsStop(tx)||/\b(?:stop|stopp|halt)\s*[.!]?$/i.test(tx.trim())&&tx.trim().split(/\s+/).length<=3){ aiHardStop(); return; }
+      }
+    };
+    r.onerror=e=>{ if(e.error==='not-allowed'||e.error==='service-not-allowed'){ AI.stopBlocked=true; } };
+    r.onend=()=>{ if(AI.stopRec!==r) return; AI.stopRec=null; if(AI.phase==='speaking'&&!AI.stopBlocked) setTimeout(aiStartStopListener,150); };
+    AI.stopRec=r; r.start();
+  }catch(e){ AI.stopRec=null; }
+}
 
 /* text-to-speech */
 function aiPickVoice(){

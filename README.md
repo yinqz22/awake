@@ -1,6 +1,6 @@
 # awake
 
-Reselling-Plattform für dich und deine Freunde: Sessions, Lager mit Ordnern, Statistiken, Audit-Log, Freunde, 3 Sprachen (EN/DE/AR), 5 Themes + eigene Farben (Haupt- und Zweitfarbe), mehrere Bilder pro Artikel, Animationen (Schneefall + eigene Emojis/Zeichen).
+Reselling-Plattform für dich und deine Freunde: Sessions, Lager mit Ordnern, Statistiken, Audit-Log, Freunde, 3 Sprachen (EN/DE/AR), 5 Themes + eigene Farben (Haupt- und Zweitfarbe), mehrere Bilder pro Artikel, **Workouts** (eigene Trainingspläne, Training starten, Fortschritt + Graphen), Animationen (Schneefall + eigene Emojis/Zeichen).
 Läuft auf jedem Gerät (Handy, Tablet, Desktop). Enthält **keine** Nutzerdaten – die Datenbank startet leer.
 
 Die Daten liegen bei Firebase (Firestore), nicht in den Dateien. Wenn du die Website auf GitHub aktualisierst, bleiben alle Accounts, Sessions und Artikel erhalten.
@@ -37,6 +37,17 @@ Das Logo-Symbol in der Navigation öffnet den **awake Assistant**: Kugel, Umscha
 - **Echte KI später anschließen:** Vor `app.js` in `index.html` ein Script einfügen, z. B.
   `window.AWAKE_ASSISTANT_PROVIDER = async ({question, lang, data}) => { /* deine API aufrufen */ return "Antworttext"; };`
   `data` enthält ein kompaktes Abbild deiner Daten (ohne Bilder). Gibt die Funktion nichts zurück, nutzt awake die eingebaute Auswertung. Den API-Schlüssel nie direkt in die öffentliche Seite schreiben, sondern über einen eigenen Server-Proxy gehen.
+
+## Workouts (neuer Tab, Hantel-Symbol)
+- **Workouts:** mehrere Workouts als Karten. **+ Workout erstellen** führt Schritt für Schritt durch Name, Gewicht, Größe, Schritte pro Tag, Trainingshäufigkeit, Trainingstage und die Übungen pro Tag (Sätze, Wiederholungen, optional Gewicht; bearbeiten, löschen, verschieben).
+- **Training:** *Workout starten* → Übung groß, *Satz geschafft*, automatisch nächster Satz/nächste Übung. *Später machen* schiebt die Übung ans Ende, *Übung überspringen* lässt sie aus (bleibt im Workout gespeichert). Zum Schluss Abschluss-Ansicht mit wechselnden Sprüchen. Ein laufendes Training bleibt beim Neuladen erhalten (*Fortsetzen*).
+- **Fortschritt:** Gewicht, Größe und Schritte mit Datum eintragen; Graphen für Körperwerte und Training (Workouts, Häufigkeit, Sätze, Dauer, Volumen) mit Filter 7 / 14 / 30 Tage / Alle.
+- **Alle Graphen** (auch die Session-Statistiken): Maus drüberfahren oder mit dem Finger tippen/wischen zeigt Datum + genauen Wert.
+- **Daten:** liegen in Firestore unter `sessions/fit_<id>` (Pläne, Körperwerte) und `sessions/fitlog_<id>_<Jahr-Monat>` (abgeschlossene Trainings). Dafür ist **keine Änderung der Firestore-Regeln** nötig. Beim Löschen des Accounts werden sie mit gelöscht.
+
+## Assistent stoppen
+- Spricht oder hört awake gerade zu, stoppt ein **Klick auf die Kugel** sofort (Sprachausgabe/Mikrofon aus, Kugel zurück in Ruhe). Im Ruhezustand verhält sich die Kugel wie vorher.
+- Sprachbefehl **„Stop"** (auch „Stopp", „Halt"): während awake spricht, lauscht der Browser auf dieses Wort. Das geht nur, wenn das Mikrofon schon einmal erlaubt wurde (es erscheint nie eine neue Berechtigungsfrage). Abschaltbar mit `AI_STOP_VOICE=false` in `app.js`.
 
 ## Updates
 Geänderte Dateien im Repo ersetzen (Add file → Upload files, gleiche Namen überschreiben). Die Daten bleiben in Firebase erhalten.
