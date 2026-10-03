@@ -18,7 +18,7 @@ const THEMES=[
 
 /* ---------- i18n (source strings are German; en/ar via dictionary) ---------- */
 const I18N=[
-['Home','Home','الرئيسية'],['Anmelden','Sign in','تسجيل الدخول'],['Registrieren','Sign up','إنشاء حساب'],['Name','Name','الاسم'],['Passwort','Password','كلمة المرور'],
+['Home','Home','الرئيسية'],['Assistent','Assistant','المساعد'],['Anmelden','Sign in','تسجيل الدخول'],['Registrieren','Sign up','إنشاء حساب'],['Name','Name','الاسم'],['Passwort','Password','كلمة المرور'],
 ['Mindestens 2 Buchstaben, muss einzigartig sein','At least 2 letters, must be unique','حرفان على الأقل، ويجب أن يكون فريدًا'],
 ['Mindestens 8 Zeichen und eine Zahl','At least 8 characters and one number','8 أحرف على الأقل ورقم واحد'],
 ['Konto erstellen','Create account','إنشاء الحساب'],
@@ -337,11 +337,14 @@ function copyKey(){
 }
 
 function showView(v){
+  if(currentView==='assistant'&&v!=='assistant') aiLeave();
   currentView=v;
   document.getElementById('navHome').classList.toggle('active', v==='home'||v==='session');
   document.getElementById('navSettings').classList.toggle('active', v==='settings');
+  const na=document.getElementById('navAssistant'); if(na) na.classList.toggle('active', v==='assistant');
   if(v==='home'){ currentSession=null; renderTop(); renderHome(); }
   if(v==='settings'){ renderSettings(); }
+  if(v==='assistant'){ currentSession=null; renderTop(); renderAssistant(); }
 }
 
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
@@ -1163,3 +1166,370 @@ function showModal(html){
   document.body.appendChild(ov);
 }
 function closeModal(){ const ov=document.getElementById('overlay'); if(ov) ov.remove(); }
+
+
+/* =====================================================================
+   AI VOICE ASSISTANT
+   Optional: connect a real AI later by defining (e.g. in a <script> tag):
+     window.AWAKE_ASSISTANT_PROVIDER = async ({question, lang, data}) => "answer text" // or null -> local engine
+   `data` is a compact snapshot of the user's awake data (no images).
+   ===================================================================== */
+const AI_LOC={de:'de-DE',en:'en-US',ar:'ar-SA'};
+const AI_T={
+ de:{status:{idle:'Frag mich etwas',listening:'Ich höre zu…',thinking:'Einen Moment…',speaking:'awake spricht…'},
+  ph:'Frage auswählen oder eingeben…',scope:'Datenquelle',all:'Alle Sessions',
+  sugg:['Erstatte mir Bericht','Was läuft gerade?','Was habe ich heute verkauft?','Wie viel Gewinn habe ich gemacht?','Was befindet sich aktuell im Lager?','Zeig mir meine letzten Verkäufe'],
+  noSR:'Spracheingabe wird von diesem Browser nicht unterstützt. Tippe deine Frage ein.',micDenied:'Mikrofonzugriff blockiert. Bitte erlaube ihn in den Browser-Einstellungen.',noSpeech:'Ich habe nichts gehört. Versuch es noch einmal.',micErr:'Spracherkennung fehlgeschlagen.',noTTS:'Sprachausgabe nicht verfügbar – Antwort wird als Text gezeigt.'},
+ en:{status:{idle:'Ask me anything',listening:'Listening…',thinking:'One moment…',speaking:'awake is speaking…'},
+  ph:'Pick or type a question…',scope:'Data source',all:'All sessions',
+  sugg:['Give me a report','What is going on right now?','What did I sell today?','How much profit have I made?','What is currently in stock?','Show me my latest sales'],
+  noSR:'Voice input is not supported by this browser. Type your question instead.',micDenied:'Microphone access blocked. Please allow it in your browser settings.',noSpeech:"I didn't hear anything. Please try again.",micErr:'Speech recognition failed.',noTTS:'Speech output not available – showing the answer as text.'},
+ ar:{status:{idle:'اسألني أي شيء',listening:'أنا أستمع…',thinking:'لحظة…',speaking:'awake يتحدث…'},
+  ph:'اختر سؤالًا أو اكتبه…',scope:'مصدر البيانات',all:'كل الجلسات',
+  sugg:['أعطني تقريرًا','ماذا يحدث الآن؟','ماذا بعت اليوم؟','كم ربحت؟','ما الموجود في المخزون حاليًا؟','أظهر لي آخر مبيعاتي'],
+  noSR:'الإدخال الصوتي غير مدعوم في هذا المتصفح. اكتب سؤالك.',micDenied:'تم حظر الوصول إلى الميكروفون. يرجى السماح به من إعدادات المتصفح.',noSpeech:'لم أسمع شيئًا. حاول مرة أخرى.',micErr:'فشل التعرف على الصوت.',noTTS:'الإخراج الصوتي غير متاح – سيتم عرض الإجابة كنص.'}
+};
+const AI_A={
+ de:{per:{today:'heute',yesterday:'gestern',week:'in den letzten 7 Tagen',month:'in den letzten 30 Tagen',all:'insgesamt'},
+  it:n=>`${n} Artikel`,
+  noSess:'Du hast noch keine Session. Erstelle oder tritt einer Session bei, dann kann ich dir Auskunft geben.',
+  sold:(n,per,pr,names)=>n?`Du hast ${per} ${n} Artikel verkauft. Dein Gewinn beträgt ${pr}.${names?` Verkauft: ${names}.`:''}`:`Du hast ${per} keine Artikel verkauft.`,
+  profit:(n,per,pr)=>n?`Dein Gewinn ${per} beträgt ${pr}, aus ${n} verkauften Artikeln.`:`Es gibt ${per} noch keine Verkäufe, daher auch keinen Gewinn.`,
+  revenue:(n,per,rv)=>n?`Dein Umsatz ${per} beträgt ${rv}, aus ${n} verkauften Artikeln.`:`Es gibt ${per} noch keine Verkäufe, daher auch keinen Umsatz.`,
+  stock:(c,val,names,off)=>(c?`Aktuell liegen ${c} Artikel im Lager (Einkaufswert ${val}).${names?` Zum Beispiel: ${names}.`:''}`:'Im Lager ist aktuell nichts.')+(off?` Außerdem sind ${off} Artikel offline gestellt.`:''),
+  lastH:'Deine letzten Verkäufe:',lastNone:'Du hast noch nichts verkauft.',lastRow:(x)=>`• ${x.name} – ${x.sell} (Gewinn ${x.profit})`,
+  best:x=>x?`Dein profitabelster Verkauf ist „${x.name}“ mit ${x.profit} Gewinn.`:'Du hast noch nichts verkauft.',
+  offline:n=>n?`${n} Artikel sind aktuell offline gestellt.`:'Aktuell ist kein Artikel offline gestellt.',
+  report:r=>['Hier ist dein Bericht:',`• Heute: ${r.today.n} verkauft, Gewinn ${r.today.profit}.`,`• Letzte 7 Tage: ${r.week.n} verkauft, Gewinn ${r.week.profit}.`,`• Insgesamt: ${r.all.n} verkauft, Umsatz ${r.all.revenue}, Gewinn ${r.all.profit}.`,`• Im Lager: ${r.stock.c} Artikel (Einkaufswert ${r.stock.value}).`,r.last?`• Zuletzt verkauft: ${r.last.name} (${r.last.sell}).`:''].filter(Boolean).join('\n'),
+  status:(r,lines)=>['Das läuft gerade bei dir:',`• Heute verkauft: ${r.today.n} (Gewinn ${r.today.profit}).`,`• Im Lager: ${r.stock.c} Artikel.`,lines.length?'Letzte Aktivitäten:\n'+lines.join('\n'):''].filter(Boolean).join('\n'),
+  help:'Ich kenne dein Lager und deine Verkäufe. Frag mich z. B. nach deinem Bericht, Gewinn, Umsatz, den Verkäufen von heute oder dem Lagerbestand.',
+  hi:'Hallo! Wie kann ich dir helfen?',
+  unknown:'Dazu habe ich keine Daten in awake. Ich kann dir etwas zu Verkäufen, Gewinn, Umsatz, Lager und Aktivität sagen.',
+  error:'Das hat gerade nicht geklappt. Bitte versuch es noch einmal.'},
+ en:{per:{today:'today',yesterday:'yesterday',week:'in the last 7 days',month:'in the last 30 days',all:'in total'},
+  it:n=>n===1?'1 item':`${n} items`,
+  noSess:"You don't have a session yet. Create or join one and I can tell you more.",
+  sold:(n,per,pr,names)=>n?`You sold ${n===1?'1 item':n+' items'} ${per}. Your profit is ${pr}.${names?` Sold: ${names}.`:''}`:`You haven't sold any items ${per}.`,
+  profit:(n,per,pr)=>n?`Your profit ${per} is ${pr}, from ${n===1?'1 sold item':n+' sold items'}.`:`There are no sales ${per}, so there is no profit yet.`,
+  revenue:(n,per,rv)=>n?`Your revenue ${per} is ${rv}, from ${n===1?'1 sold item':n+' sold items'}.`:`There are no sales ${per}, so there is no revenue yet.`,
+  stock:(c,val,names,off)=>(c?`You currently have ${c===1?'1 item':c+' items'} in stock (purchase value ${val}).${names?` For example: ${names}.`:''}`:'Nothing is in stock right now.')+(off?` Also, ${off} ${off===1?'item is':'items are'} offline.`:''),
+  lastH:'Your latest sales:',lastNone:"You haven't sold anything yet.",lastRow:x=>`• ${x.name} – ${x.sell} (profit ${x.profit})`,
+  best:x=>x?`Your most profitable sale is “${x.name}” with ${x.profit} profit.`:"You haven't sold anything yet.",
+  offline:n=>n?`${n} ${n===1?'item is':'items are'} currently offline.`:'No item is offline right now.',
+  report:r=>['Here is your report:',`• Today: ${r.today.n} sold, profit ${r.today.profit}.`,`• Last 7 days: ${r.week.n} sold, profit ${r.week.profit}.`,`• Total: ${r.all.n} sold, revenue ${r.all.revenue}, profit ${r.all.profit}.`,`• In stock: ${r.stock.c===1?'1 item':r.stock.c+' items'} (purchase value ${r.stock.value}).`,r.last?`• Last sold: ${r.last.name} (${r.last.sell}).`:''].filter(Boolean).join('\n'),
+  status:(r,lines)=>["Here's what's going on:",`• Sold today: ${r.today.n} (profit ${r.today.profit}).`,`• In stock: ${r.stock.c===1?'1 item':r.stock.c+' items'}.`,lines.length?'Recent activity:\n'+lines.join('\n'):''].filter(Boolean).join('\n'),
+  help:'I know your inventory and your sales. Ask me for your report, profit, revenue, today\'s sales or your stock.',
+  hi:'Hi! How can I help you?',
+  unknown:"I don't have data about that in awake. I can tell you about sales, profit, revenue, stock and activity.",
+  error:'That did not work just now. Please try again.'},
+ ar:{per:{today:'اليوم',yesterday:'أمس',week:'خلال آخر 7 أيام',month:'خلال آخر 30 يومًا',all:'إجمالًا'},
+  it:n=>`${n} منتج`,
+  noSess:'ليست لديك جلسة بعد. أنشئ جلسة أو انضم إلى واحدة وسأخبرك بالمزيد.',
+  sold:(n,per,pr,names)=>n?`لقد بعت ${n} منتج ${per}. ربحك ${pr}.${names?` المباع: ${names}.`:''}`:`لم تبع أي منتج ${per}.`,
+  profit:(n,per,pr)=>n?`ربحك ${per} هو ${pr} من ${n} منتج مباع.`:`لا توجد مبيعات ${per}، لذلك لا يوجد ربح.`,
+  revenue:(n,per,rv)=>n?`إيراداتك ${per} هي ${rv} من ${n} منتج مباع.`:`لا توجد مبيعات ${per}، لذلك لا توجد إيرادات.`,
+  stock:(c,val,names,off)=>(c?`لديك حاليًا ${c} منتج في المخزون (قيمة الشراء ${val}).${names?` مثل: ${names}.`:''}`:'لا يوجد شيء في المخزون حاليًا.')+(off?` كما أن ${off} منتج غير معروض.`:''),
+  lastH:'آخر مبيعاتك:',lastNone:'لم تبع أي شيء بعد.',lastRow:x=>`• ${x.name} – ${x.sell} (ربح ${x.profit})`,
+  best:x=>x?`أربح عملية بيع لديك هي «${x.name}» بربح ${x.profit}.`:'لم تبع أي شيء بعد.',
+  offline:n=>n?`${n} منتج غير معروض حاليًا.`:'لا يوجد أي منتج غير معروض حاليًا.',
+  report:r=>['هذا تقريرك:',`• اليوم: بيع ${r.today.n}، الربح ${r.today.profit}.`,`• آخر 7 أيام: بيع ${r.week.n}، الربح ${r.week.profit}.`,`• الإجمالي: بيع ${r.all.n}، الإيرادات ${r.all.revenue}، الربح ${r.all.profit}.`,`• في المخزون: ${r.stock.c} منتج (قيمة الشراء ${r.stock.value}).`,r.last?`• آخر عملية بيع: ${r.last.name} (${r.last.sell}).`:''].filter(Boolean).join('\n'),
+  status:(r,lines)=>['هذا ما يجري الآن:',`• المبيعات اليوم: ${r.today.n} (الربح ${r.today.profit}).`,`• في المخزون: ${r.stock.c} منتج.`,lines.length?'آخر الأنشطة:\n'+lines.join('\n'):''].filter(Boolean).join('\n'),
+  help:'أعرف مخزونك ومبيعاتك. اسألني عن تقريرك أو الربح أو الإيرادات أو مبيعات اليوم أو المخزون.',
+  hi:'مرحبًا! كيف يمكنني مساعدتك؟',
+  unknown:'ليست لدي بيانات عن ذلك في awake. يمكنني إخبارك عن المبيعات والربح والإيرادات والمخزون والنشاط.',
+  error:'لم ينجح ذلك الآن. يرجى المحاولة مرة أخرى.'}
+};
+const aiT=()=>AI_T[curLang]||AI_T.en, aiA=()=>AI_A[curLang]||AI_A.en;
+const AI={mode:'text',scope:'all',phase:'idle',raf:0,last:0,ph:[0,1.7,3.4,5.1],spd:.35,lvl:0,pulse:0,rec:null,run:0,cache:null,typeRaf:0,keyBound:false};
+const AI_RM=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+const AI_SVG={
+ chat:'<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
+ voice:'<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+ chev:'<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>',
+ send:'<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'
+};
+
+function renderAssistant(){
+  const T=aiT();
+  AI.mode=LS.get('awake_ai_mode')==='voice'?'voice':'text';
+  AI.scope=LS.get('awake_ai_scope')||'all';
+  AI.phase='idle'; AI.cache=null; AI.run++;
+  document.getElementById('content').innerHTML=`<div class="fade ai-wrap">
+    <div class="ai-switch" id="aiSwitch" data-mode="${AI.mode}"><span class="pill"></span>
+      <button type="button" id="aiBtnText" class="${AI.mode==='text'?'on':''}" onclick="aiSetMode('text')">${AI_SVG.chat}<span>Text</span></button>
+      <button type="button" id="aiBtnVoice" class="${AI.mode==='voice'?'on':''}" onclick="aiSetMode('voice')">${AI_SVG.voice}<span>Voice</span></button>
+    </div>
+    <div class="ai-orb" id="aiOrb">
+      <div class="ai-aura" id="aiAura"></div>
+      <div class="ai-ring r1"></div><div class="ai-ring r2"></div>
+      <div class="ai-sphere" id="aiSphere"><i class="ai-blob b1"></i><i class="ai-blob b2"></i><i class="ai-blob b3"></i><i class="ai-blob b4"></i><span class="ai-sheen"></span><span class="ai-logo"></span></div>
+    </div>
+    <div class="ai-status" id="aiStatus">${esc(T.status.idle)}</div>
+    <div class="ai-caption" id="aiCaption"></div>
+    <div class="ai-input">
+      <div class="ai-fieldwrap">
+        <div class="ai-menu hidden" id="aiMenu">${T.sugg.map((x,i)=>`<button type="button" onclick="aiPick(${i})">${esc(x)}</button>`).join('')}</div>
+        <div class="ai-field">
+          <input id="aiInput" type="text" autocomplete="off" enterkeyhint="send" placeholder="${esc(T.ph)}" onkeydown="if(event.key==='Enter'){event.preventDefault();aiSubmit();}">
+          <button type="button" class="ai-icon-btn" id="aiChev" onclick="aiToggleMenu(event)" aria-label="Menu">${AI_SVG.chev}</button>
+          <button type="button" class="ai-send" onclick="aiSubmit()" aria-label="Send">${AI_SVG.send}</button>
+        </div>
+      </div>
+      <button type="button" class="ai-mic" id="aiMic" onclick="aiToggleMic()" aria-label="Microphone"><span class="ico-mic"></span></button>
+    </div>
+    <div class="ai-scope"><span>${esc(T.scope)}</span><select id="aiScope" onchange="aiSetScope(this.value)"><option value="all">${esc(T.all)}</option></select></div>
+  </div>`;
+  if(!AI.keyBound){
+    AI.keyBound=true;
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') aiClosePopup(); });
+    document.addEventListener('click',e=>{ const m=document.getElementById('aiMenu'); if(m&&!m.classList.contains('hidden')&&!e.target.closest('.ai-fieldwrap')) aiCloseMenu(); });
+  }
+  AI.last=0; cancelAnimationFrame(AI.raf); AI.raf=requestAnimationFrame(aiFrame);
+  aiFillScope();
+}
+function aiLeave(){
+  cancelAnimationFrame(AI.raf); AI.raf=0;
+  if(AI.rec){ const r=AI.rec; AI.rec=null; r.onend=r.onresult=r.onerror=null; try{r.abort();}catch(e){} }
+  aiStopOutput(); aiClosePopup(true); AI.phase='idle';
+}
+
+/* orb: JS-driven so it reacts instantly to the speech state */
+function aiFrame(t){
+  const orb=document.getElementById('aiOrb'); if(!orb){ AI.raf=0; return; }
+  AI.raf=requestAnimationFrame(aiFrame);
+  const dt=Math.min(.05,AI.last?(t-AI.last)/1000:.016); AI.last=t;
+  const rm=AI_RM?.4:1;
+  const target={idle:.35,thinking:.95,listening:.85,speaking:1.8}[AI.phase]*rm;
+  AI.spd+=(target-AI.spd)*Math.min(1,dt*5);
+  AI.pulse=Math.max(0,AI.pulse-dt*3.2);
+  let tl;
+  if(AI.phase==='speaking') tl=.28+.22*(.5+.5*Math.sin(t/85)*Math.sin(t/230+1))+AI.pulse*.45;
+  else if(AI.phase==='listening') tl=.12+.08*Math.sin(t/250)+AI.pulse*.4;
+  else if(AI.phase==='thinking') tl=.07+.04*Math.sin(t/190);
+  else tl=.02+.02*Math.sin(t/1500);
+  AI.lvl+=(tl-AI.lvl)*Math.min(1,dt*(tl>AI.lvl?16:7));
+  const F=[1.3,1.7,1.1,2.0], amp=26*(1+AI.lvl*1.2);
+  const blobs=orb.querySelectorAll('.ai-blob');
+  for(let i=0;i<4;i++){
+    AI.ph[i]+=dt*AI.spd*F[i];
+    const x=Math.sin(AI.ph[i]+i*1.7)*amp, y=Math.cos(AI.ph[i]*.83+i*2.3)*amp, sc=1+.18*Math.sin(AI.ph[i]*1.3+i);
+    blobs[i].style.transform=`translate(${x.toFixed(2)}%,${y.toFixed(2)}%) scale(${sc.toFixed(3)})`;
+  }
+  const lv=AI.lvl*(AI_RM?.5:1);
+  document.getElementById('aiSphere').style.transform=`scale(${(1+lv*.13).toFixed(4)})`;
+  const au=document.getElementById('aiAura');
+  au.style.opacity=Math.min(.95,.35+lv*1.1).toFixed(3);
+  au.style.transform=`scale(${(1+lv*.4).toFixed(3)})`;
+}
+function aiSetPhase(p){
+  AI.phase=p;
+  const orb=document.getElementById('aiOrb'); if(!orb) return;
+  orb.classList.toggle('listening',p==='listening');
+  const mic=document.getElementById('aiMic'); if(mic) mic.classList.toggle('on',p==='listening');
+  const st=document.getElementById('aiStatus'); if(st) st.textContent=aiT().status[p]||'';
+}
+function aiCaption(t){ const c=document.getElementById('aiCaption'); if(c) c.textContent=t||''; }
+
+/* mode / scope / menu */
+function aiSetMode(m){
+  AI.mode=m; LS.set('awake_ai_mode',m);
+  document.getElementById('aiSwitch').dataset.mode=m;
+  document.getElementById('aiBtnText').classList.toggle('on',m==='text');
+  document.getElementById('aiBtnVoice').classList.toggle('on',m==='voice');
+  if(m==='text'&&AI.phase==='speaking'){ aiStopOutput(); aiSetPhase('idle'); }
+}
+function aiSetScope(v){ AI.scope=v; LS.set('awake_ai_scope',v); }
+async function aiFillScope(){
+  const sel=document.getElementById('aiScope'); if(!sel) return;
+  try{
+    const list=await aiFetchSessions(); const s2=document.getElementById('aiScope'); if(!s2) return;
+    s2.innerHTML=`<option value="all">${esc(aiT().all)}</option>`+list.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+    s2.value=list.some(s=>s.id===AI.scope)?AI.scope:'all'; AI.scope=s2.value;
+  }catch(e){}
+}
+function aiToggleMenu(e){ e.stopPropagation(); const m=document.getElementById('aiMenu'); const open=m.classList.toggle('hidden')===false; document.getElementById('aiChev').classList.toggle('open',open); }
+function aiCloseMenu(){ const m=document.getElementById('aiMenu'); if(m) m.classList.add('hidden'); const c=document.getElementById('aiChev'); if(c) c.classList.remove('open'); }
+function aiPick(i){ aiCloseMenu(); aiAsk(aiT().sugg[i]); }
+function aiSubmit(){ const inp=document.getElementById('aiInput'); const v=inp.value; if(!v.trim()) return; inp.value=''; inp.blur(); aiCloseMenu(); aiAsk(v); }
+
+/* microphone → speech recognition */
+function aiToggleMic(){
+  if(AI.phase==='listening'){ if(AI.rec) AI.rec.stop(); return; }
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ toast(aiT().noSR); return; }
+  aiCloseMenu(); aiStopOutput(); aiClosePopup(true);
+  const r=new SR(); r.lang=AI_LOC[curLang]||'en-US'; r.interimResults=true; r.continuous=false; r.maxAlternatives=1;
+  let fin='', interim='';
+  r.onstart=()=>{ aiCaption(''); aiSetPhase('listening'); };
+  r.onresult=e=>{
+    interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){ const R=e.results[i]; if(R.isFinal) fin+=R[0].transcript; else interim+=R[0].transcript; }
+    AI.pulse=1; aiCaption('„'+(fin+interim).trim()+'“');
+  };
+  r.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed') toast(aiT().micDenied);
+    else if(e.error==='no-speech') toast(aiT().noSpeech);
+    else if(e.error!=='aborted') toast(aiT().micErr);
+  };
+  r.onend=()=>{
+    if(AI.rec!==r) return; AI.rec=null;
+    const txt=(fin||interim).trim();
+    if(txt) aiAsk(txt); else { aiSetPhase('idle'); aiCaption(''); }
+  };
+  AI.rec=r;
+  try{ r.start(); }catch(e){ AI.rec=null; aiSetPhase('idle'); toast(aiT().micErr); }
+}
+
+/* ask → answer → output */
+const aiSleep=ms=>new Promise(r=>setTimeout(r,ms));
+function aiClean(raw){ return String(raw||'').replace(/^\s*(?:hey|hallo|hi|hello|ok|okay)?[\s,]*awake\b[\s,.!:;-]*/i,'').trim(); }
+async function aiAsk(raw){
+  const woke=/^\s*(?:hey|hallo|hi|hello|ok|okay)?[\s,]*awake\b/i.test(String(raw||''));
+  let q=aiClean(raw); if(!q&&woke) q='hallo'; if(!q) return;
+  aiStopOutput(); aiClosePopup(true);
+  const run=++AI.run;
+  aiCaption('„'+q+'“'); aiSetPhase('thinking');
+  let ans;
+  try{ const data=await aiLoadData(); ans=await aiAnswer(q,data); }catch(e){ ans=aiA().error; }
+  await aiSleep(200);
+  if(run!==AI.run||currentView!=='assistant') return;
+  if(AI.mode==='voice'){
+    if('speechSynthesis' in window&&window.SpeechSynthesisUtterance){ aiSpeak(ans,run); return; }
+    toast(aiT().noTTS);
+  }
+  aiSetPhase('idle'); aiShowPopup(q,ans);
+}
+function aiStopOutput(){ AI.run++; try{ if('speechSynthesis' in window) speechSynthesis.cancel(); }catch(e){} }
+
+/* text-to-speech */
+function aiPickVoice(){
+  try{
+    const l=curLang, vs=(speechSynthesis.getVoices()||[]).filter(v=>(v.lang||'').toLowerCase().startsWith(l));
+    return vs.find(v=>/natural|google|online|premium|enhanced/i.test(v.name))||vs.find(v=>v.default)||vs[0]||null;
+  }catch(e){ return null; }
+}
+function aiSpeak(text,run){
+  const synth=speechSynthesis; synth.cancel();
+  const clean=text.replace(/[•·]/g,'').replace(/\n+/g,'. ').replace(/\s+/g,' ').trim();
+  const parts=clean.replace(/([.!?؟])\s+/g,'$1|').split('|').map(x=>x.trim()).filter(Boolean);
+  const voice=aiPickVoice(); let fin=false;
+  const end=()=>{ if(fin||run!==AI.run) return; fin=true; aiSetPhase('idle'); };
+  parts.forEach((p,idx)=>{
+    const u=new SpeechSynthesisUtterance(p); u.lang=AI_LOC[curLang]||'en-US'; if(voice) u.voice=voice; u.rate=1.03;
+    u.onstart=()=>{ if(run===AI.run&&AI.phase!=='speaking') aiSetPhase('speaking'); };
+    u.onboundary=()=>{ if(run===AI.run) AI.pulse=1; };
+    u.onerror=end;
+    if(idx===parts.length-1) u.onend=end;
+    synth.speak(u);
+  });
+  aiSetPhase('speaking');
+  setTimeout(()=>{ if(run===AI.run&&AI.phase==='speaking'&&!synth.speaking&&!synth.pending) end(); },1500);  // TTS silently failed
+}
+
+/* text answer popup with live typing */
+function aiShowPopup(q,text){
+  aiClosePopup(true);
+  const ov=document.createElement('div'); ov.id='aiPop'; ov.className='ai-pop-overlay';
+  ov.innerHTML=`<div class="ai-pop" role="dialog" aria-live="polite">
+    <button type="button" class="ai-x" aria-label="Close" onclick="aiClosePopup()">✕</button>
+    <div class="ai-pop-head"><span class="ai-mark"></span><b>awake</b></div>
+    <div class="ai-pop-q"></div>
+    <div class="ai-pop-a" dir="auto"><span id="aiTyped"></span><i class="ai-caret" id="aiCaret"></i></div></div>`;
+  ov.querySelector('.ai-pop-q').textContent='„'+q+'“';
+  ov.onclick=e=>{ if(e.target===ov) aiClosePopup(); };
+  document.body.appendChild(ov);
+  const node=document.createTextNode(''); document.getElementById('aiTyped').appendChild(node);
+  const pop=ov.querySelector('.ai-pop'), cps=Math.max(70,Math.min(170,text.length/2)), t0=performance.now(); let shown=0;
+  const step=now=>{
+    const n=Math.min(text.length,Math.floor((now-t0)/1000*cps)+1);
+    if(n!==shown){ node.nodeValue=text.slice(0,n); shown=n; pop.scrollTop=pop.scrollHeight; }
+    if(n<text.length) AI.typeRaf=requestAnimationFrame(step);
+    else { AI.typeRaf=0; const c=document.getElementById('aiCaret'); if(c) c.remove(); }
+  };
+  AI.typeRaf=requestAnimationFrame(step);
+}
+function aiClosePopup(now){
+  cancelAnimationFrame(AI.typeRaf); AI.typeRaf=0;
+  const ov=document.getElementById('aiPop'); if(!ov) return;
+  ov.removeAttribute('id');
+  if(now){ ov.remove(); return; }
+  ov.classList.add('closing'); setTimeout(()=>ov.remove(),190);
+}
+
+/* data */
+async function aiFetchSessions(force){
+  if(!force&&AI.cache&&Date.now()-AI.cache.ts<15000) return AI.cache.list;
+  const ids=user.sessions||[];
+  const docs=await Promise.all(ids.map(id=>db.doc('sessions/'+id).get().catch(()=>null)));
+  const list=docs.filter(d=>d&&d.exists).map(d=>{ const s=d.data(); return {id:d.id,name:s.name,items:s.items||[],folders:s.folders||[],audit:s.audit||[]}; });
+  AI.cache={ts:Date.now(),list}; return list;
+}
+async function aiLoadData(){
+  const all=await aiFetchSessions();
+  const use=AI.scope==='all'?all:all.filter(s=>s.id===AI.scope);
+  const items=[], audit=[];
+  use.forEach(s=>{
+    const fm={}; s.folders.forEach(f=>fm[f.id]=f.name);
+    s.items.forEach(i=>items.push({name:i.name,status:i.status,buyPrice:+i.buyPrice||0,sellPrice:+i.sellPrice||0,platform:i.platform,folder:fm[i.folderId]||'',session:s.name,createdAt:i.createdAt,soldAt:i.soldAt}));
+    s.audit.forEach(a=>audit.push(a));
+  });
+  return {sessions:use.map(s=>({id:s.id,name:s.name})),items,audit};
+}
+function aiSnapshot(d){ return {now:new Date().toISOString(),currency:'EUR',sessions:d.sessions,items:d.items,recentActivity:d.audit.slice().sort((a,b)=>b.ts-a.ts).slice(0,20)}; }
+async function aiAnswer(q,data){
+  const p=window.AWAKE_ASSISTANT_PROVIDER;
+  if(typeof p==='function'){
+    try{ const r=await p({question:q,lang:curLang,data:aiSnapshot(data)}); if(r&&String(r).trim()) return String(r).trim(); }catch(e){}
+  }
+  return aiLocal(q,data);
+}
+
+/* local intent engine – answers only from real awake data */
+function aiEur(n){
+  try{ return new Intl.NumberFormat(curLang==='de'?'de-DE':curLang==='ar'?'ar-EG-u-nu-latn':'en-US',{style:'currency',currency:'EUR'}).format(n); }
+  catch(e){ return n.toFixed(2)+' €'; }
+}
+function aiPeriod(s){
+  const d=new Date(); d.setHours(0,0,0,0); const T=d.getTime(), D=864e5;
+  if(/heute|today|اليوم/.test(s)) return {k:'today',from:T,to:Infinity};
+  if(/gestern|yesterday|أمس|امس/.test(s)) return {k:'yesterday',from:T-D,to:T};
+  if(/woche|week|أسبوع|اسبوع/.test(s)) return {k:'week',from:T-6*D,to:Infinity};
+  if(/monat|month|شهر/.test(s)) return {k:'month',from:T-29*D,to:Infinity};
+  return {k:'all',from:-Infinity,to:Infinity};
+}
+function aiStats(items,p){
+  const sold=items.filter(i=>i.status==='verkauft'&&(p.k==='all'||(i.soldAt>=p.from&&i.soldAt<p.to)));
+  return {sold,n:sold.length,profit:sold.reduce((a,i)=>a+(i.sellPrice-i.buyPrice),0),revenue:sold.reduce((a,i)=>a+i.sellPrice,0)};
+}
+function aiLocal(q,data){
+  const L=aiA(), s=q.toLowerCase(), has=re=>re.test(s);
+  if(has(/^(hallo|hi|hey|hello|مرحبا|اهلا|أهلا)\b/)&&s.length<20) return L.hi;
+  if(!data.sessions.length) return L.noSess;
+  const p=aiPeriod(s), st=aiStats(data.items,p), per=L.per[p.k];
+  const soldAll=data.items.filter(i=>i.status==='verkauft').sort((a,b)=>(b.soldAt||0)-(a.soldAt||0));
+  const stock=data.items.filter(i=>i.status==='lager').sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const off=data.items.filter(i=>i.status==='offline').length;
+  const stockVal=stock.reduce((a,i)=>a+i.buyPrice,0);
+  const mini=pk=>{ const x=aiStats(data.items,aiPeriod(pk)); return {n:x.n,profit:aiEur(x.profit),revenue:aiEur(x.revenue)}; };
+  const summary=()=>({today:mini('today'),week:mini('week'),all:mini('total'),stock:{c:stock.length,value:aiEur(stockVal)},last:soldAll[0]?{name:soldAll[0].name,sell:aiEur(soldAll[0].sellPrice)}:null});
+  if(has(/bericht|report|zusammenfassung|überblick|ueberblick|summary|overview|briefing|تقرير|ملخص/)) return L.report(summary());
+  if(has(/läuft|laeuft|going on|what.?s up|happening|status|يحدث|صاير|الجديد/)){
+    const lines=data.audit.slice().sort((a,b)=>b.ts-a.ts).slice(0,4).map(a=>`• ${a.actor} ${tr(a.action)}`);
+    return L.status(summary(),lines);
+  }
+  if(has(/letzt|neueste|last|recent|latest|آخر/)&&has(/verkauf|sale|sold|sell|بيع|مبيع/)&&p.k==='all'){
+    if(!soldAll.length) return L.lastNone;
+    return L.lastH+'\n'+soldAll.slice(0,5).map(i=>L.lastRow({name:i.name,sell:aiEur(i.sellPrice),profit:aiEur(i.sellPrice-i.buyPrice)})).join('\n');
+  }
+  if(has(/\bbeste[rsn]?\b|profitabel|meisten gewinn|most profitable|best.?sell|أفضل|أربح/)){
+    const b=soldAll.slice().sort((a,c)=>(c.sellPrice-c.buyPrice)-(a.sellPrice-a.buyPrice))[0];
+    return L.best(b?{name:b.name,profit:aiEur(b.sellPrice-b.buyPrice)}:null);
+  }
+  if(has(/gewinn|profit|verdien|earned|margin|ربح|أرباح|ارباح/)) return L.profit(st.n,per,aiEur(st.profit));
+  if(has(/umsatz|revenue|einnahmen|turnover|إيراد|دخل/)) return L.revenue(st.n,per,aiEur(st.revenue));
+  if(has(/offline/)) return L.offline(off);
+  if(has(/lager|bestand|stock|inventor|مخزون|المخزن/)) return L.stock(stock.length,aiEur(stockVal),stock.slice(0,5).map(i=>i.name).join(', '),off);
+  if(has(/verkauf|verkauft|sold|sales|\bsell\b|بيع|مبيع|بعت/)) return L.sold(st.n,per,aiEur(st.profit),st.n&&st.n<=5?st.sold.map(i=>i.name).join(', '):'');
+  if(has(/hilfe|help|was kannst|what can you|مساعدة/)) return L.help;
+  return L.unknown;
+}

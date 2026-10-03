@@ -29,6 +29,15 @@ Die Seite ist als installierbare App eingerichtet (Icon, Startbildschirm, Offlin
 
 Kostenlos, kein App Store nötig. Wichtig: PWA-Installation funktioniert nur über `https://` (GitHub Pages liefert das automatisch), nicht beim lokalen Testen über `file://`.
 
+## Sprachassistent (neuer Tab)
+Das Logo-Symbol in der Navigation öffnet den **awake Assistant**: Kugel, Umschalter *Text | Voice*, Eingabefeld mit Fragen-Dropdown und Mikrofon.
+- Antworten kommen **nur aus deinen echten awake-Daten** (Verkäufe, Gewinn, Umsatz, Lager, Aktivität). Gibt es etwas nicht, sagt awake das klar. Unten kannst du wählen, ob alle Sessions oder nur eine ausgewertet wird.
+- **Text:** Antwort erscheint als Popup mit Live-Tippanimation. **Voice:** awake liest die Antwort vor, die Kugel reagiert.
+- Spracheingabe und Vorlesen nutzen die Browser-Funktionen (Chrome, Edge, Safari; Firefox hat keine Spracherkennung). Nötig: `https://` und Mikrofon-Erlaubnis.
+- **Echte KI später anschließen:** Vor `app.js` in `index.html` ein Script einfügen, z. B.
+  `window.AWAKE_ASSISTANT_PROVIDER = async ({question, lang, data}) => { /* deine API aufrufen */ return "Antworttext"; };`
+  `data` enthält ein kompaktes Abbild deiner Daten (ohne Bilder). Gibt die Funktion nichts zurück, nutzt awake die eingebaute Auswertung. Den API-Schlüssel nie direkt in die öffentliche Seite schreiben, sondern über einen eigenen Server-Proxy gehen.
+
 ## Updates
 Geänderte Dateien im Repo ersetzen (Add file → Upload files, gleiche Namen überschreiben). Die Daten bleiben in Firebase erhalten.
 

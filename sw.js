@@ -1,4 +1,4 @@
-const CACHE = 'awake-v3';
+const CACHE = 'awake-v4';
 const SHELL = [
   './',
   './index.html',
