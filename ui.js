@@ -4,6 +4,7 @@
    - ?r=<route> (set by 404.html for known routes like /admin) is only opened if the app allows it,
      otherwise the visitor sees the 404 page. Nothing here grants access – it only decides what to SHOW.
    ===================================================================== */
+window.AWAKE_ROUTES=window.AWAKE_ROUTES||{};
 (function(){
   const content=()=>document.getElementById('content'), top=()=>document.getElementById('topbar');
   let ticking=false;
@@ -25,8 +26,7 @@
   };
   const route=new URLSearchParams(location.search).get('r');
   if(route){
-    const KNOWN={};                       // routes the app can open for allowed users – filled in by later modules (e.g. KNOWN.admin)
-    window.AWAKE_ROUTES=KNOWN;
+    const KNOWN=window.AWAKE_ROUTES;       // routes the app can open for allowed users (admin.js registers 'admin')
     const tryOpen=()=>{
       const open=KNOWN[route];
       if(typeof open==='function'&&typeof user!=='undefined'&&user){ if(open()!==false){ try{ history.replaceState(null,'',location.pathname); }catch(e){} return true; } }

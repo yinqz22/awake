@@ -55,6 +55,15 @@ Das Logo-Symbol in der Navigation öffnet den **awake Assistant**: Kugel, Umscha
 - Neuer Kopieren-Button (Icon wie vorgegeben), Funktion unverändert.
 - `404.html`: professionelle 404-Seite für jede nicht vorhandene Adresse (GitHub Pages zeigt sie automatisch). `ui.js` enthält die Kopfzeilen-Animation und die Weiterleitung bekannter Routen (z. B. `/admin`) – ohne freigeschaltete Route sieht jeder die 404-Seite.
 
+## Admin-System (v5.2)
+Login läuft jetzt über **Firebase Authentication** (Name → `<name>@awake.app`, Passwort bleibt geheim bei Google). Alte Konten werden beim ersten Login automatisch übernommen (altes Passwort wird einmal geprüft, danach wird der alte Hash gelöscht).
+- Rollen `member` / `admin` / `owner` liegen in `authz/<uid>`. Der Owner wird **einmalig von Hand in der Firebase-Konsole** gesetzt – aus der App heraus kann niemand `owner` schreiben.
+- **Admin-Tab** (nur Admin/Owner sichtbar) mit USER BASE und DEEP SEARCH, Profil-Popup, Kick, Ban/Unban, Konto löschen, Admin ernennen (nur Owner).
+- Die **22-stellige User-ID** liegt in `adminmeta/<name>` und ist nur für Admins lesbar.
+- **Echte Sicherheit:** `firestore.rules.admin` (strenge Regeln). Die bisherige `firestore.rules` bleibt als Rückfall. Erst veröffentlichen, wenn alle Freunde sich einmal angemeldet haben.
+- **Security check** (Knopf im Admin-Tab oder `?r=selftest`): versucht verbotene Dinge und zeigt, ob die Datenbank sie blockiert.
+- Grenzen des kostenlosen Tarifs: Passwörter anderer lassen sich nicht direkt setzen (Ersatz: Reset-Freigabe im Admin-Panel), der Anmeldename ist fest (nur Groß-/Kleinschreibung änderbar), beim Löschen durch einen Admin bleibt der leere Login-Eintrag in der Konsole stehen.
+
 ## Updates
 Geänderte Dateien im Repo ersetzen (Add file → Upload files, gleiche Namen überschreiben). Die Daten bleiben in Firebase erhalten.
 

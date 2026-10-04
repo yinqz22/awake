@@ -62,12 +62,13 @@ async function wkLoadLogs(fromTs){
   }));
   return need.flatMap(ym=>(WK.logs[ym]&&WK.logs[ym].sessions)||[]).sort((a,b)=>a.ts-b.ts);
 }
-async function wkDeleteAll(){
-  const d=await db.doc(wkMainPath()).get().catch(()=>null);
+async function wkDeleteAll(id){
+  id=id||user.id;
+  const d=await db.doc('sessions/fit_'+id).get().catch(()=>null);
   const months=(d&&d.exists&&d.data().months)||[];
-  await Promise.all(months.map(ym=>db.doc(`sessions/fitlog_${user.id}_${ym}`).delete().catch(()=>{})));
-  await db.doc(wkMainPath()).delete().catch(()=>{});
-  LS.del('awake_wk_run_'+user.id);
+  await Promise.all(months.map(ym=>db.doc(`sessions/fitlog_${id}_${ym}`).delete().catch(()=>{})));
+  await db.doc('sessions/fit_'+id).delete().catch(()=>{});
+  LS.del('awake_wk_run_'+id);
 }
 function wkLeave(){ clearInterval(WK.clock); WK.clock=0; }
 

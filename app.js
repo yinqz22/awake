@@ -144,6 +144,7 @@ function subscribeMe(){
   unsubMe=db.doc('users/'+user.id).onSnapshot(snap=>{
     if(!snap.exists) return;
     const d=snap.data(), before=(user.incoming||[]).length;
+    delete d.sessions; delete d.passHash; delete d.claimProof; delete d.resetOk;
     Object.assign(user,d);
     if((d.incoming||[]).length>before) toast('Neue Freundschaftsanfrage!');
     if(currentView==='home'&&document.getElementById('friendList')) renderFriends();
@@ -157,15 +158,23 @@ async function initDb(){
   const cfg=window.AWAKE_FIREBASE_CONFIG;
   if(!window.firebase||!cfg||!cfg.apiKey||String(cfg.apiKey).startsWith('YOUR_')) throw new Error('not-configured');
   firebase.initializeApp(cfg);
+  if(firebase.auth) window.fbAuth=firebase.auth();
   const fs=firebase.firestore();
   const clean=o=>JSON.parse(JSON.stringify(o));
-  return { doc:p=>{ const r=fs.doc(p); return { get:()=>r.get(), set:d=>r.set(clean(d)), update:d=>r.update(clean(d)), delete:()=>r.delete(), onSnapshot:(a,b)=>r.onSnapshot(a,b) }; } };
+  return { doc:p=>{ const r=fs.doc(p); return { get:()=>r.get(), set:d=>r.set(clean(d)), update:d=>r.update(clean(d)), delete:()=>r.delete(), onSnapshot:(a,b)=>r.onSnapshot(a,b), updateRaw:d=>r.update(d), setRaw:d=>r.set(d) }; },
+    col:p=>({ get:()=>fs.collection(p).get() }),
+    ts:()=>firebase.firestore.FieldValue.serverTimestamp(), del:()=>firebase.firestore.FieldValue.delete() };
 }
 async function boot(){
   try{ db = await initDb(); }
   catch(e){ document.getElementById('loginErr').textContent='Datenbank nicht konfiguriert (siehe README).'; document.getElementById('regErr').textContent='Datenbank nicht konfiguriert (siehe README).'; return; }
-  const saved = LS.get('awake_user');
-  if(saved){ try{ await loginAs(JSON.parse(saved).name, true);}catch(e){ LS.del('awake_user'); } }
+  const notice=LS.get('awake_notice'); if(notice){ LS.del('awake_notice'); document.getElementById('loginErr').textContent=notice; }
+  if(!window.fbAuth){ document.getElementById('loginErr').textContent='Firebase Auth fehlt (siehe README).'; return; }
+  const un=fbAuth.onAuthStateChanged(async au=>{
+    un(); if(!au) return;
+    try{ await loginAs(idFromEmail(au.email),true); }
+    catch(e){ if(e&&(e.banned||e.user)) document.getElementById('loginErr').textContent=e.message; try{ await fbAuth.signOut(); }catch(_){} }
+  });
 }
 let _rz; window.addEventListener('resize',()=>{clearTimeout(_rz);_rz=setTimeout(()=>{ if(currentView==='session'&&currentTab==='stats'&&currentSession) renderStats(true); },200);});
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); }); }
@@ -197,6 +206,22 @@ async function sha256(str){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+/* ---------- accounts: Firebase Auth (login name -> <id>@awake.app), profile in users/<id> ---------- */
+const AUTH_DOMAIN='awake.app';
+const emailOf=id=>id+'@'+AUTH_DOMAIN;
+const idFromEmail=e=>String(e||'').split('@')[0];
+const E=m=>{ const e=new Error(m); e.user=true; return e; };
+const isCredErr=e=>e&&['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-login-credentials'].includes(e.code);
+function authMsg(e){
+  if(e&&e.user) return e.message;
+  const c=e&&e.code;
+  if(c==='auth/network-request-failed') return 'Keine Verbindung. Bitte versuche es erneut.';
+  if(c==='auth/too-many-requests') return 'Zu viele Versuche. Bitte warte kurz.';
+  if(c==='auth/operation-not-allowed') return 'Anmeldung ist in Firebase noch nicht aktiviert (Authentication → E-Mail/Passwort).';
+  return 'Fehler: '+((e&&e.message)||e);
+}
+function newProfile(name){ return {name, avatar:'', lang:'en', theme:'dark', friends:[], incoming:[], outgoing:[], snow:false, anim:'off', customAnims:[], customColors:DEFAULT_CUSTOM, createdAt:Date.now()}; }
+
 async function doRegister(e){
   e.preventDefault();
   const name = document.getElementById('regName').value.trim();
@@ -204,15 +229,39 @@ async function doRegister(e){
   const errEl = document.getElementById('regErr'); errEl.textContent='';
   if(name.length<2){errEl.textContent='Name braucht mindestens 2 Buchstaben.';return false;}
   if(!/^(?=.*\d).{8,}$/.test(pass)){errEl.textContent='Passwort: mindestens 8 Zeichen und eine Zahl.';return false;}
+  const id=safeId(name); let created=false;
   try{
-    const existing = await db.doc('users/'+safeId(name)).get();
-    if(existing && existing.exists){ errEl.textContent='Dieser Name ist schon vergeben.'; return false; }
-    const passHash = await sha256(pass);
-    const data = {name, passHash, avatar:'', lang:'en', theme:'dark', friends:[], incoming:[], outgoing:[], sessions:[], snow:false, anim:'off', customAnims:[], customColors:DEFAULT_CUSTOM, createdAt:Date.now()};
-    await db.doc('users/'+safeId(name)).set(data);
-    await loginAs(name);
-  }catch(err){ errEl.textContent='Fehler: '+(err.message||err); }
+    let cred;
+    try{ cred=await fbAuth.createUserWithEmailAndPassword(emailOf(id),pass); created=true; }
+    catch(err){
+      if(err.code!=='auth/email-already-in-use') throw err;
+      // the login exists but may have lost its profile (deleted by an admin) -> allow re-registration with the same password
+      try{ cred=await fbAuth.signInWithEmailAndPassword(emailOf(id),pass); }catch(_){ throw E('Dieser Name ist schon vergeben.'); }
+    }
+    let ex=null; try{ ex=await db.doc('users/'+id).get(); }catch(_){}
+    if(ex&&ex.exists){ if(created){ try{ await cred.user.delete(); }catch(_){ await fbAuth.signOut(); } } else await fbAuth.signOut(); throw E('Dieser Name ist schon vergeben.'); }
+    await db.doc('users/'+id).set({...newProfile(name), uid:cred.user.uid});
+    await loginAs(id);
+  }catch(err){ errEl.textContent=authMsg(err); }
   return false;
+}
+
+/* an account from before the Firebase login: prove the old password once, then bind the profile to a Firebase login */
+async function claimLegacy(id,pass){
+  let cred;
+  try{ cred=await fbAuth.createUserWithEmailAndPassword(emailOf(id),pass); }
+  catch(err){ if(err.code==='auth/email-already-in-use') throw E('Falsches Passwort.'); throw err; }
+  const drop=async m=>{ try{ await cred.user.delete(); }catch(_){ try{ await fbAuth.signOut(); }catch(__){} } throw E(m); };
+  let snap=null; try{ snap=await db.doc('users/'+id).get(); }catch(_){}
+  if(!snap||!snap.exists) return drop('Nutzer nicht gefunden.');
+  const d=snap.data();
+  if(d.uid&&d.uid!==cred.user.uid) return drop('Falsches Passwort.');
+  if(!d.uid){
+    const h=await sha256(pass);
+    if(!(d.resetOk===true||(d.passHash&&d.passHash===h))) return drop('Falsches Passwort.');
+    try{ await db.doc('users/'+id).updateRaw({uid:cred.user.uid, claimProof:h}); }catch(_){ return drop('Anmeldung nicht möglich. Bitte versuche es später erneut.'); }
+  }
+  return cred;
 }
 
 async function doLogin(e){
@@ -220,33 +269,115 @@ async function doLogin(e){
   const name = document.getElementById('loginName').value.trim();
   const pass = document.getElementById('loginPass').value;
   const errEl = document.getElementById('loginErr'); errEl.textContent='';
+  const id=safeId(name);
   try{
-    const doc = await db.doc('users/'+safeId(name)).get();
-    if(!doc || !doc.exists){ errEl.textContent='Nutzer nicht gefunden.'; return false; }
-    const passHash = await sha256(pass);
-    if(doc.data().passHash !== passHash){ errEl.textContent='Falsches Passwort.'; return false; }
-    await loginAs(name);
-  }catch(err){ errEl.textContent='Fehler: '+(err.message||err); }
+    try{ await fbAuth.signInWithEmailAndPassword(emailOf(id),pass); }
+    catch(err){ if(!isCredErr(err)) throw err; await claimLegacy(id,pass); }
+    try{ await loginAs(id); }
+    catch(err){
+      // login exists but the profile is gone (account deleted by an admin)
+      if(err&&err.message==='not found'){ try{ await fbAuth.signOut(); }catch(_){} throw E('Dieses Konto existiert nicht mehr. Du kannst dich neu registrieren.'); }
+      throw err;
+    }
+  }catch(err){ errEl.textContent=authMsg(err); try{ if(err&&err.banned) await fbAuth.signOut(); }catch(_){} }
   return false;
 }
 
-async function loginAs(name, silent){
-  const doc = await db.doc('users/'+safeId(name)).get();
-  if(!doc || !doc.exists) throw new Error('not found');
-  user = {id:safeId(name), ...doc.data()};
-  LS.set('awake_user', JSON.stringify({name}));
+/* ---------- roles / ban / kick / public id (see firestore.rules.admin) ---------- */
+async function ensureAuthz(au,id,ud){
+  const ref=db.doc('authz/'+au.uid);
+  const s=await ref.get();
+  if(s.exists) return s.data();
+  const a={id, name:ud.name, role:'member', banned:false, joinedAt:ud.createdAt||Date.now()};
+  await ref.set(a);
+  return a;
+}
+function genPublicId(){
+  const A='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', out=[], lim=Math.floor(256/A.length)*A.length;
+  while(out.length<22){ const b=crypto.getRandomValues(new Uint8Array(32)); for(const x of b){ if(x<lim&&out.length<22) out.push(A[x%A.length]); } }
+  return out.join('');
+}
+async function ensurePublicId(id){
+  if(LS.get('awake_pid_'+id)==='1') return;
+  try{
+    let has=false;
+    try{ const m=await db.doc('adminmeta/'+id).get(); has=m.exists; }catch(e){ /* members may not read it: just try to create */ }
+    if(!has){
+      for(let i=0;i<3;i++){
+        const pid=genPublicId();
+        try{ const ex=await db.doc('pubids/'+pid).get(); if(ex.exists) continue; }catch(e){}
+        await db.doc('pubids/'+pid).set({id});
+        await db.doc('adminmeta/'+id).set({publicId:pid, createdAt:Date.now()});
+        break;
+      }
+    }
+    LS.set('awake_pid_'+id,'1');
+  }catch(e){ if(e&&e.code==='permission-denied') LS.set('awake_pid_'+id,'1'); }
+}
+async function migrateSessions(id,ud){
+  const ref=db.doc('private/'+id); let list=null, readOk=false;
+  try{ const s=await ref.get(); readOk=true; if(s.exists) list=s.data().sessions||[]; }catch(e){}
+  if(list===null){
+    list=ud.sessions||[];
+    if(readOk){ try{ await ref.set({sessions:list}); }catch(e){ readOk=false; } }
+  }
+  if(readOk&&(ud.sessions!==undefined||ud.passHash!==undefined||ud.claimProof!==undefined)){
+    try{ await db.doc('users/'+id).updateRaw({sessions:db.del(), passHash:db.del(), claimProof:db.del()}); }catch(e){}
+  }
+  return list;
+}
+async function saveMySessions(){ await db.doc('private/'+user.id).set({sessions:user.sessions||[]}); }
+let actTimer=null;
+function touchActivity(){ if(!user||document.visibilityState==='hidden') return; db.doc('activity/'+user.id).setRaw({lastActive:db.ts()}).catch(()=>{}); }
+function startActivity(){ clearInterval(actTimer); touchActivity(); actTimer=setInterval(touchActivity,4*60*1000); }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') touchActivity(); });
+let unsubAz=null;
+function forceLogout(msg){ LS.set('awake_notice',msg); LS.del('awake_user'); (window.fbAuth?fbAuth.signOut():Promise.resolve()).catch(()=>{}).then(()=>location.reload()); }
+function subscribeAuthz(){
+  if(unsubAz) unsubAz(); if(!user||!user.uid) return;
+  unsubAz=db.doc('authz/'+user.uid).onSnapshot(async snap=>{
+    if(!snap.exists||!user) return;
+    const a=snap.data(); user._az=a;
+    if(a.banned){ forceLogout('Dein Konto wurde gesperrt.'+(a.banReason?' Grund: '+a.banReason:'')); return; }
+    try{
+      const tk=await fbAuth.currentUser.getIdTokenResult(), at=new Date(tk.authTime).getTime();
+      const k=a.kickedAt&&a.kickedAt.toMillis?a.kickedAt.toMillis():0;
+      if(k&&k>at){ forceLogout('Du wurdest von einem Admin abgemeldet. Bitte melde dich neu an.'); return; }
+    }catch(e){}
+    if(typeof adminSyncNav==='function') adminSyncNav();
+  },()=>{});
+}
+
+async function loginAs(id, silent){
+  const au=window.fbAuth&&fbAuth.currentUser; if(!au) throw new Error('no-auth');
+  const udoc = await db.doc('users/'+id).get();
+  if(!udoc || !udoc.exists) throw new Error('not found');
+  const ud=udoc.data();
+  if(ud.uid && ud.uid!==au.uid) throw new Error('uid mismatch');
+  const az=await ensureAuthz(au,id,ud);
+  if(az.banned){ const e=new Error('Dein Konto wurde gesperrt.'+(az.banReason?' Grund: '+az.banReason:'')); e.banned=true; e.user=true; throw e; }
+  const sessions=await migrateSessions(id,ud);
+  const u={id, ...ud, sessions, _az:az, uid:au.uid}; delete u.passHash; delete u.claimProof; delete u.resetOk;
+  user=u;
+  ensurePublicId(id);
+  LS.set('awake_user', JSON.stringify({name:ud.name}));
   applyTheme(user.theme||'dark');
   applyLang(user.lang||'en');
   applyAnim(getAnim());
-  subscribeMe();
+  subscribeMe(); subscribeAuthz(); startActivity();
   document.getElementById('auth').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('app').classList.add('fade');
   renderTop();
+  if(typeof adminSyncNav==='function') adminSyncNav();
   showView('home');
 }
 
-function logout(){ LS.del('awake_user'); location.reload(); }
+function logout(){ LS.del('awake_user'); clearInterval(actTimer); (window.fbAuth?fbAuth.signOut():Promise.resolve()).catch(()=>{}).then(()=>location.reload()); }
+async function verifyPassword(pass){
+  try{ await fbAuth.currentUser.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(emailOf(user.id),pass)); return true; }
+  catch(e){ return false; }
+}
 function confirmLogout(){
   showModal(`<h3>Bist du sicher, dass du dich abmelden willst?</h3>
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="background:var(--danger)" onclick="logout()">Ja, abmelden</button></div>`);
@@ -339,15 +470,18 @@ function copyKey(){
 function showView(v){
   if(currentView==='assistant'&&v!=='assistant') aiLeave();
   if(currentView==='workouts'&&v!=='workouts'&&typeof wkLeave==='function') wkLeave();
+  if(v==='admin'&&!(typeof adminAllowed==='function'&&adminAllowed())){ if(typeof showNotFound==='function') showNotFound(); return; }   // UI guard only – the database rules are the real protection
   currentView=v;
   document.getElementById('navHome').classList.toggle('active', v==='home'||v==='session');
   document.getElementById('navSettings').classList.toggle('active', v==='settings');
   const na=document.getElementById('navAssistant'); if(na) na.classList.toggle('active', v==='assistant');
   const nw=document.getElementById('navWorkouts'); if(nw) nw.classList.toggle('active', v==='workouts');
+  const nad=document.getElementById('navAdmin'); if(nad) nad.classList.toggle('active', v==='admin');
   if(v==='home'){ currentSession=null; renderTop(); renderHome(); }
   if(v==='settings'){ renderSettings(); }
   if(v==='assistant'){ currentSession=null; renderTop(); renderAssistant(); }
   if(v==='workouts'){ currentSession=null; renderTop(); if(typeof wkRender==='function') wkRender(); }
+  if(v==='admin'){ currentSession=null; renderTop(); if(typeof admRender==='function') admRender(); }
 }
 
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
@@ -526,7 +660,7 @@ async function createSession(){
   const data = {key, name, image, ownerName:user.name, admins:[], members:[{name:user.name, avatar:user.avatar||'', role:'besitzer'}], folders:[], items:[], audit:[{ts:Date.now(),actor:user.name,action:`Session „${name}" erstellt`}], createdAt:Date.now()};
   await db.doc('sessions/'+id).set(data);
   user.sessions = [...(user.sessions||[]), id];
-  await db.doc('users/'+user.id).update({sessions:user.sessions});
+  await saveMySessions();
   closeModal();
   openSession(id);
 }
@@ -545,7 +679,7 @@ async function joinSession(){
   }
   if(!(user.sessions||[]).includes(id)){
     user.sessions = [...(user.sessions||[]), id];
-    await db.doc('users/'+user.id).update({sessions:user.sessions});
+    await saveMySessions();
   }
   closeModal();
   openSession(id);
@@ -1010,8 +1144,7 @@ function transferCrown(name){
 }
 async function confirmCrown(name){
   const pass = document.getElementById('crownPass').value;
-  const hash = await sha256(pass);
-  if(hash !== user.passHash){ document.getElementById('crownErr').textContent='Falsches Passwort.'; return; }
+  if(!(await verifyPassword(pass))){ document.getElementById('crownErr').textContent='Falsches Passwort.'; return; }
   const members = currentSession.members.map(m=>{
     if(m.name===user.name) return {...m, role:'admin'};
     if(m.name===name) return {...m, role:'besitzer'};
@@ -1153,18 +1286,26 @@ function confirmDeleteAccount(){
     <div class="err" id="delAccErr"></div>
     <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Abbrechen</button><button class="btn-primary" style="background:var(--danger)" onclick="deleteAccountNow()">Account endgültig löschen</button></div>`);
 }
+async function wipeAccountData(id, publicId){
+  // order matters: the profile and login record go last (the rules need them to authorise the earlier deletes)
+  try{ if(typeof wkDeleteAll==='function') await wkDeleteAll(id); }catch(e){}
+  for(const p of ['private/'+id,'activity/'+id,'adminmeta/'+id].concat(publicId?['pubids/'+publicId]:[])){ try{ await db.doc(p).delete(); }catch(e){} }
+}
 async function deleteAccountNow(){
   const pass = document.getElementById('delAccPass').value;
   const errEl = document.getElementById('delAccErr');
-  const hash = await sha256(pass);
-  if(hash !== user.passHash){ errEl.textContent='Falsches Passwort.'; return; }
+  if(user._az&&user._az.role==='owner'){ errEl.textContent='Der Owner kann nicht gelöscht werden.'; return; }
+  if(!(await verifyPassword(pass))){ errEl.textContent='Falsches Passwort.'; return; }
   await Promise.all((user.friends||[]).map(async f=>{
     try{ const tid=safeId(f); const td=await db.doc('users/'+tid).get();
       if(td.exists) await db.doc('users/'+tid).update({friends:(td.data().friends||[]).filter(n=>n!==user.name)});
     }catch(e){}
   }));
-  try{ if(typeof wkDeleteAll==='function') await wkDeleteAll(); }catch(e){}
+  let pid=null; try{ const m=await db.doc('adminmeta/'+user.id).get(); pid=m.exists?m.data().publicId:null; }catch(e){}
+  await wipeAccountData(user.id,pid);
   await db.doc('users/'+user.id).delete();
+  try{ await db.doc('authz/'+user.uid).delete(); }catch(e){}
+  try{ await fbAuth.currentUser.delete(); }catch(e){}
   LS.del('awake_user');
   location.reload();
 }
@@ -1194,27 +1335,16 @@ async function saveSettings(){
 
   if(newName && newName !== user.name){
     if(newName.length<2){ toast('Name zu kurz.'); return; }
-    const newId = safeId(newName), oldId = user.id;
-    if(newId!==oldId){
-      const exists = await db.doc('users/'+newId).get();
-      if(exists.exists){ toast('Name bereits vergeben.'); return; }
-    }
-    const fullDoc = await db.doc('users/'+oldId).get();
-    await db.doc('users/'+newId).set({...fullDoc.data(), name:newName});
-    if(newId!==oldId) await db.doc('users/'+oldId).delete();
-    user.id = newId; subscribeMe();
-    LS.set('awake_user', JSON.stringify({name:newName}));
-    user.name = newName;
+    if(safeId(newName)!==user.id){ toast('Der Anmeldename kann nicht mehr geändert werden – nur Groß-/Kleinschreibung.'); return; }
+    updates.name=newName; user.name=newName;
   }
   if(pendingAvatar){ updates.avatar = pendingAvatar; user.avatar = pendingAvatar; pendingAvatar=null; }
 
   if(newPass){
     if(!oldPass){ toast('Bitte aktuelles Passwort eingeben.'); return; }
-    const oldHash = await sha256(oldPass);
-    if(oldHash !== user.passHash){ toast('Aktuelles Passwort ist falsch.'); return; }
     if(!/^(?=.*\d).{8,}$/.test(newPass)){ toast('Neues Passwort: mindestens 8 Zeichen und eine Zahl.'); return; }
-    updates.passHash = await sha256(newPass);
-    user.passHash = updates.passHash;
+    if(!(await verifyPassword(oldPass))){ toast('Aktuelles Passwort ist falsch.'); return; }
+    try{ await fbAuth.currentUser.updatePassword(newPass); }catch(e){ toast('Passwort konnte nicht geändert werden. Bitte melde dich neu an und versuche es erneut.'); return; }
   }
 
   await db.doc('users/'+user.id).update(updates);
@@ -1233,7 +1363,7 @@ function confirmDeleteSession(){
 async function deleteSessionNow(){
   await db.doc('sessions/'+currentSession.id).delete();
   user.sessions=(user.sessions||[]).filter(id=>id!==currentSession.id);
-  await db.doc('users/'+user.id).update({sessions:user.sessions});
+  await saveMySessions();
   closeModal();
   showView('home');
   toast('Session gelöscht.');
@@ -1248,7 +1378,7 @@ async function leaveSessionNow(){
   const audit=[...(currentSession.audit||[]), {ts:Date.now(),actor:user.name,action:'hat die Session verlassen'}];
   await db.doc('sessions/'+currentSession.id).update({members, audit});
   user.sessions=(user.sessions||[]).filter(id=>id!==currentSession.id);
-  await db.doc('users/'+user.id).update({sessions:user.sessions});
+  await saveMySessions();
   closeModal();
   showView('home');
   toast('Du hast die Session verlassen.');
